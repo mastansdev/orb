@@ -50,20 +50,36 @@ class PositionManager:
 
     # --------------------------------------------------
 
-    def open_position(self, security_id, symbol, entry_price, stop_loss):
+    def open_position(
+        self,
+        security_id,
+        symbol,
+        entry_price,
+        stop_loss
+    ):
 
         qty = self.calculate_quantity(
             entry_price,
             stop_loss
         )
 
-        if qty <= 0:
-            return 0
+        return qty
+
+    # --------------------------------------------------
+
+    def confirm_position(
+        self,
+        security_id,
+        symbol,
+        entry_price,
+        stop_loss,
+        qty
+    ):
 
         investment = qty * entry_price
 
         if not self.capital_manager.block(investment):
-            return 0
+            return False
 
         self.positions[security_id] = {
             "symbol": symbol,
@@ -73,7 +89,7 @@ class PositionManager:
             "investment": investment
         }
 
-        return qty
+        return True
 
     # --------------------------------------------------
 
@@ -91,6 +107,31 @@ class PositionManager:
             "qty": qty,
             "investment": qty * entry_price
         }
+
+    # --------------------------------------------------
+
+    def remove_position(
+        self,
+        security_id
+    ):
+        """
+        Remove a position after broker confirmation
+        (manual exit / broker square-off).
+        """
+
+        position = self.positions.get(security_id)
+
+        if position is None:
+            return False
+
+        self.capital_manager.release(
+            position["investment"],
+            0
+        )
+
+        del self.positions[security_id]
+
+        return True
 
     # --------------------------------------------------
 

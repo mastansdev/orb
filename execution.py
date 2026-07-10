@@ -1,0 +1,62 @@
+"""
+Execution Layer
+
+Single execution gateway for the entire ORB Auto Trader.
+
+The Engine never knows whether it is running in
+PAPER or LIVE mode.
+
+All BUY / SELL requests flow through this module.
+"""
+
+from config import TRADING_MODE
+
+from paper_execution import PaperExecution
+from live_execution import LiveExecution
+
+
+class Execution:
+
+    def __init__(self):
+
+        if TRADING_MODE.upper() == "LIVE":
+            self.executor = LiveExecution()
+            print("Execution Mode : LIVE")
+
+        else:
+            self.executor = PaperExecution()
+            print("Execution Mode : PAPER")
+
+    # --------------------------------------------------
+
+    def buy(
+        self,
+        security_id,
+        symbol,
+        price,
+        qty
+    ):
+
+        return self.executor.buy(
+            security_id,
+            symbol,
+            price,
+            qty
+        )
+
+    # --------------------------------------------------
+
+    def sell(
+        self,
+        security_id,
+        symbol,
+        price,
+        qty
+    ):
+
+        return self.executor.sell(
+            security_id,
+            symbol,
+            price,
+            qty
+        )

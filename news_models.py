@@ -231,3 +231,34 @@ class ProcessedNews:
     def add_note(self, note: str):
 
         self.notes.append(note)
+
+@dataclass
+class MarketStory:
+
+    name: str
+
+    catalyst: str
+
+    category: str
+
+    sector: str
+
+    industry: str
+
+    theme: str
+
+    confidence: float
+
+    priority: str
+
+    lifecycle: str
+
+    expected_duration: str
+
+    supporting_news: List[str]
+
+    affected_symbols: List[str]
+
+    created_at: datetime
+
+    updated_at: datetime

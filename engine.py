@@ -15,7 +15,8 @@ from tick_cache import TickCache
 from orb_engine import ORBEngine
 from strategy import Strategy
 from position_manager import PositionManager
-from paper_execution import PaperExecution
+from execution import Execution
+from broker_sync import BrokerSync
 from risk_manager import RiskManager
 from trade_logger import TradeLogger
 from capital_manager import CapitalManager
@@ -25,9 +26,7 @@ from industry_engine import IndustryEngine
 from results_engine import ResultsEngine
 from theme_engine import ThemeEngine
 from relative_strength_engine import RelativeStrengthEngine
-# CHANGE 1 — Import MarketMoodEngine
 from market_mood_engine import MarketMoodEngine
-# NEW ADDITION — Import CandleEngine
 from candle_engine import candle_engine
 from config import DECISION_TRACE
 
@@ -35,28 +34,20 @@ from config import DECISION_TRACE
 from system_registry import SystemRegistry
 from intelligence_engine import IntelligenceEngine
 from portfolio_risk_manager import PortfolioRiskManager
-# STEP 1A — Import DecisionAudit
 from decision_audit import DecisionAudit
 
 # Portfolio Control
 from trade_controller import TradeController
-
-# FIXED: Moved MarketRecorder import to the top of the file
 from market_recorder import MarketRecorder
-
-# STEP 1 — Import PortfolioLedger
 from portfolio_ledger import PortfolioLedger
 
-# --------------------------------------------------
-# Market Intelligence
-# --------------------------------------------------
+# Market Intelligence Collectors & Models
 from collectors.news_collector import NewsCollector
 from news_classifier import NewsClassifier
 from impact_engine import ImpactEngine
 from market_catalyst import MarketCatalyst
 from market_memory import MarketMemory
 from market_environment import MarketEnvironment
-
 from news_engine import NewsEngine
 
 load_dotenv()
@@ -82,39 +73,22 @@ class Engine:
         self.results_engine = ResultsEngine()
         self.relative_strength_engine = RelativeStrengthEngine()
         self.theme_engine = ThemeEngine()
-        # CHANGE 2 — Instantiate MarketMoodEngine
         self.market_mood_engine = MarketMoodEngine()
-        # NEW ADDITION — Instantiate CandleEngine
         self.candle_engine = candle_engine
 
         # --------------------------------------------------
-        # Market Intelligence
+        # Market Intelligence Setup
         # --------------------------------------------------
-
         self.news_engine = NewsEngine(self)
-
         self.news_collector = NewsCollector()
-
         self.news_classifier = NewsClassifier()
-
         self.impact_engine = ImpactEngine()
-
         self.market_catalyst = MarketCatalyst()
-
         self.market_memory = MarketMemory()
-
         self.market_environment = MarketEnvironment()
 
-
-        # --------------------------------------------------
         # Register News Sources
-        # --------------------------------------------------
-
-        self.news_engine.register_collector(
-            self.news_collector
-        )
-
-
+        self.news_engine.register_collector(self.news_collector)
 
         # Build structural registration layers first
         self.registry = SystemRegistry()
@@ -127,55 +101,32 @@ class Engine:
         self.registry.register("results", self.results_engine)
         self.registry.register("relative_strength", self.relative_strength_engine)
         self.registry.register("theme", self.theme_engine)
-        # CHANGE 3 — Register market_mood in the SystemRegistry
-        self.registry.register(
-            "market_mood",
-            self.market_mood_engine
-        )
-        self.registry.register(
-            "market_environment",
-            self.market_environment
-        )
-        self.registry.register(
-            "market_catalyst",
-            self.market_catalyst
-        )
-        self.registry.register(
-            "market_memory",
-            self.market_memory
-        )
+        self.registry.register("market_mood", self.market_mood_engine)
+        self.registry.register("market_environment", self.market_environment)
+        self.registry.register("market_catalyst", self.market_catalyst)
+        self.registry.register("market_memory", self.market_memory)
 
         self.strategy = Strategy()
-        self.position_manager = PositionManager(
-            capital_manager=self.capital_manager
-        )
-        self.paper_execution = PaperExecution()
+        self.position_manager = PositionManager(capital_manager=self.capital_manager)
+        self.execution = Execution()
+        self.broker_sync = BrokerSync()
         self.risk_manager = RiskManager()
         self.portfolio_risk_manager = PortfolioRiskManager()
-        # STEP 1B — Instantiate DecisionAudit
         self.decision_audit = DecisionAudit()
-        
-        # STEP 2 — Create PortfolioLedger Instance
         self.portfolio_ledger = PortfolioLedger()
 
-        # STEP 3 — Initialize the Trading Day ledger using available capital
-        self.portfolio_ledger.start_day(
-            self.capital_manager.available()
-        )
+        # Initialize the Trading Day ledger using available capital
+        self.portfolio_ledger.start_day(self.capital_manager.available())
         
         # Portfolio Control
         self.trade_controller = TradeController()
-        
         self.trade_logger = TradeLogger()
         self.position_recovery = PositionRecovery()
         self.open_position_manager = OpenPositionManager()
-        self.monitor = BotMonitor(
-            capital_manager=self.capital_manager
-        )
-        self.monitor.set_runtime_objects(
-            self.position_manager,
-            self.tick_cache
-        )
+        
+        self.monitor = BotMonitor(capital_manager=self.capital_manager)
+        self.monitor.set_runtime_objects(self.position_manager, self.tick_cache)
+        
         self.watchdog = Watchdog()
         self.day_summary = DaySummary()
         self.telegram = TelegramNotifier(
@@ -184,11 +135,7 @@ class Engine:
         )
         self.summary_printed = False
         self.last_sector_print = ""
-
-        # FIXED: Clean instantiation via the global top-level import
-        self.market_recorder = MarketRecorder(
-            interval_seconds=1
-        )
+        self.market_recorder = MarketRecorder(interval_seconds=1)
 
         self.trades = self.position_recovery.load()
         
@@ -224,17 +171,16 @@ class Engine:
         self.monitor.set_connection("CONNECTED")
 
     def process_tick(self, security_id, symbol, ltp, ltt):
-        # FIXED: Wrap entire tick pipeline in try...finally to enforce "One tick -> One snapshot"
         try:
             self.monitor.increment_processed_ticks()
 
             # ---------------------------------
-            # Tick Cache
+            # Tick Cache Update
             # ---------------------------------
             self.tick_cache.update(security_id, ltp, ltt)
 
             # ---------------------------------
-            # Price Engine
+            # Price Engine Update
             # ---------------------------------
             price_engine.update(symbol=symbol, ltp=ltp, last_update=ltt)
             change = price_engine.get_change(symbol)
@@ -242,11 +188,7 @@ class Engine:
             # ---------------------------------
             # Candle Engine Update
             # ---------------------------------
-            self.candle_engine.update(
-                symbol=symbol,
-                ltp=ltp,
-                timestamp=ltt
-            )
+            self.candle_engine.update(symbol=symbol, ltp=ltp, timestamp=ltt)
 
             # ---------------------------------
             # Sector & Industry Intelligence
@@ -257,15 +199,13 @@ class Engine:
             self.relative_strength_engine.update(symbol, ltp, change)
                 
             # ---------------------------------
-            # Live Floating MTM
+            # Live Floating MTM Calculation
             # ---------------------------------
             total_mtm = 0.0
-
             for sid, position in self.position_manager.positions.items():
                 tick = self.tick_cache.get(sid)
                 if tick is None:
                     continue
-
                 current_price = tick["ltp"]
                 total_mtm += (current_price - position["entry_price"]) * position["qty"]
 
@@ -279,16 +219,12 @@ class Engine:
             # Live / Historical ORB Builder
             # ---------------------------------
             current_time = ltt
-
-            # Always update ORB from live ticks
             self.orb_engine.update(security_id, ltp, ltt)
             orb = self.orb_engine.get_orb(security_id)
 
-            # If bot started after 09:30 and ORB is unavailable,
-            # load historical ORB as a fallback.
+            # Fallback to historical ORB data if running late
             if current_time >= "09:30:00" and orb is None:
                 historical_orb = self.historical_data.get_cached_orb(security_id)
-
                 if historical_orb:
                     self.orb_engine.load_historical_orb(
                         security_id,
@@ -298,7 +234,7 @@ class Engine:
                     orb = self.orb_engine.get_orb(security_id)
 
             # ---------------------------------
-            # Instrumentation Block
+            # Instrumentation Metrics Update
             # ---------------------------------
             completed = self.orb_engine.completed_count()
             self.monitor.set_orb_completed(completed)
@@ -308,26 +244,58 @@ class Engine:
 
             trade = self.trades.get(security_id)
 
-            # ---------------------------------
-            # ENTRY
-            # ---------------------------------
-            if trade is None:
+            # --------------------------------------------------
+            # Broker Synchronization
+            # --------------------------------------------------
+            if trade is not None:
+                if not self.broker_sync.has_position(security_id):
+                    print(f"⚠ Manual Exit Detected : {symbol}")
 
-                # Master trading switch
-                if not self.trade_controller.is_trading_enabled():
+                    # Remove internal tracking states
+                    self.position_manager.remove_position(security_id)
+                    self.open_position_manager.remove(security_id)
+
+                    # Free risk allocation capacity
+                    self.portfolio_risk_manager.remove_trade(symbol)
+
+                    # Update portfolio ledger state before dropping the dict handle
+                    capital_released = trade["qty"] * ltp
+                    self.portfolio_ledger.record_sell(
+                        capital_released=capital_released,
+                        gross_pnl=0
+                    )
+
+                    # Clear recovery state maps safely
+                    del self.trades[security_id]
+                    if self.trades:
+                        self.position_recovery.save(self.trades)
+                    else:
+                        self.position_recovery.clear()
+
+                    # Update visual dashboard states
+                    self.monitor.decrement("active_trades")
+                    self.monitor.set_last_trade(f"MANUAL EXIT {symbol}")
+
+                    # Dispatch notifications
+                    self.telegram.send(
+                        f"⚠️ MANUAL EXIT DETECTED\n\n"
+                        f"Stock : {symbol}\n\n"
+                        f"The position was closed outside the bot.\n"
+                        f"Internal state synchronized successfully."
+                    )
                     return
 
-                # New entry switch
+            # ---------------------------------
+            # POSITION ENTRY PIPELINE
+            # ---------------------------------
+            if trade is None:
+                if not self.trade_controller.is_trading_enabled():
+                    return
                 if not self.trade_controller.is_entries_enabled():
                     return
 
-                signal = self.strategy.is_buy_signal(
-                    ltp,
-                    orb,
-                    ltt
-                )
+                signal = self.strategy.is_buy_signal(ltp, orb, ltt)
 
-                # STEP 2 — Modified logic rule and clean print configuration block
                 if signal:
                     print("\n========== LIVE ORB CANDIDATE ==========")
                     print(f"Symbol      : {symbol}")
@@ -338,7 +306,6 @@ class Engine:
                     print(f"Signal      : {signal}")
                     print("========================================\n")
 
-                if signal:
                     intelligence = self.intelligence_engine.get(symbol)
                     decision = self.trade_selection_engine.evaluate(
                         symbol, ltp, orb, intelligence
@@ -351,7 +318,6 @@ class Engine:
                     print(f"Reasons   : {decision['reasons']}")
                     print("=====================================\n")
 
-                    # Record every evaluated decision
                     if decision is not None:
                         self.decision_audit.record_decision(
                             security_id=security_id,
@@ -359,35 +325,28 @@ class Engine:
                             decision=decision
                         )
 
-                    if decision is None:
+                    if decision is None or not decision["selected"]:
                         return
 
-                    if not decision["selected"]:
-                        return
-
-                    # Validate allocation rules against portfolio layer bounds
+                    # Validate macro structural layout risk constraints
                     portfolio_decision = self.portfolio_risk_manager.can_take_trade(
                         symbol=symbol,
                         intelligence=intelligence
                     )
 
-                    # STEP 3 — Record Portfolio Decision
                     self.decision_audit.record_portfolio_decision(
                         security_id=security_id,
                         portfolio_decision=portfolio_decision
                     )
 
-                    # Log systemic exclusions to metrics server for performance visibility
                     if not portfolio_decision["allowed"]:
                         self.monitor.increment("portfolio_rejected")
                         return
 
-                if signal:
                     self.monitor.increment("signals")
 
                     if symbol in ("VTL", "NUVAMA"):
                         trigger_price = orb["high"] + ENTRY_BUFFER
-
                         print("\n========== BREAKOUT DEBUG ==========")
                         print(f"Symbol        : {symbol}")
                         print(f"Time          : {ltt}")
@@ -398,7 +357,6 @@ class Engine:
                         print("====================================\n")
 
                     stop_loss = orb["low"] - ORB_BUFFER
-
                     qty = self.position_manager.open_position(
                         security_id, symbol, ltp, stop_loss
                     )
@@ -407,7 +365,15 @@ class Engine:
                         self.monitor.increment("insufficient_capital")
                         return
 
-                    self.paper_execution.buy(security_id, symbol, ltp, qty)
+                    execution_result = self.execution.buy(security_id, symbol, ltp, qty)
+                    if not execution_result["success"]:
+                        return
+
+                    if not self.position_manager.confirm_position(
+                        security_id, symbol, ltp, stop_loss, qty
+                    ):
+                        return
+                    
                     print(f"BUY : {symbol} @ {ltp:.2f} Qty:{qty}")
 
                     self.telegram.send(
@@ -427,21 +393,14 @@ class Engine:
                     if new_trade is None:
                         return
 
-                    # ---------------------------------
-                    # Trade Metadata Setters
-                    # ---------------------------------
                     new_trade["qty"] = qty
                     new_trade["symbol"] = symbol
                     new_trade["entry_time"] = ltt
                     new_trade["entry_date"] = datetime.now().strftime("%Y-%m-%d")
                     new_trade["capital_used"] = round(qty * ltp, 2)
-                    new_trade["orb"] = {
-                        "high": orb["high"],
-                        "low": orb["low"]
-                    }
+                    new_trade["orb"] = {"high": orb["high"], "low": orb["low"]}
                     new_trade["decision"] = decision
 
-                    # STEP 4 — Record Execution
                     self.decision_audit.record_execution(
                         security_id=security_id,
                         execution={
@@ -453,10 +412,8 @@ class Engine:
                         }
                     )
 
-                    # Commit allocation reference only when parameters pass validation
                     self.portfolio_risk_manager.add_trade(symbol)
 
-                    # Execute explicit sandbox tracking state assertions under debugging flags
                     if __debug__:
                         assert symbol in self.portfolio_risk_manager.open_trades, (
                             f"Portfolio allocation state out of sync for {symbol}"
@@ -464,30 +421,22 @@ class Engine:
 
                     self.trades[security_id] = new_trade
 
-                    # CHANGE 2 — Wire PortfolioLedger BUY
+                    # Commit ledger adjustments for capital calculation tracking
                     capital_used = qty * ltp
-                    self.portfolio_ledger.record_buy(
-                        capital_used=capital_used
-                    )
+                    self.portfolio_ledger.record_buy(capital_used=capital_used)
 
                     self.open_position_manager.add(security_id, new_trade)
-                    
                     self.orb_engine.set_entry_taken(security_id)
                     self.position_recovery.save(self.trades)
 
             # ---------------------------------
-            # EXIT
+            # POSITION EXIT PIPELINE
             # ---------------------------------
             else:
-                # CHANGE 1 — Complete /exitall evaluation bypass routing
                 if self.trade_controller.is_exit_all_requested():
                     result = self.EXIT_MANUAL
                 else:
-                    result = self.risk_manager.update(
-                        trade,
-                        ltp,
-                        ltt
-                    )
+                    result = self.risk_manager.update(trade, ltp, ltt)
 
                 if result == self.EXIT_TARGET:
                     self.monitor.increment("target")
@@ -496,7 +445,6 @@ class Engine:
                 elif result == self.EXIT_TIME:
                     self.monitor.increment("time_exit")
 
-                # Route execution state drop when static exit signatures hit targets
                 if result in [
                     self.EXIT_TARGET,
                     self.EXIT_STOPLOSS,
@@ -504,25 +452,20 @@ class Engine:
                     self.EXIT_MANUAL,
                     self.EXIT_SYSTEM,
                 ]:
-
                     pnl = (ltp - trade["entry"]) * trade["qty"]
 
-                    # Required Fix #1 — paper_execution.sell() executed BEFORE record_sell()
-                    self.paper_execution.sell(
-                        security_id,
-                        symbol,
-                        ltp,
-                        trade["qty"]
+                    execution_result = self.execution.sell(
+                        security_id, symbol, ltp, trade["qty"]
                     )
+                    if not execution_result["success"]:
+                        return
 
-                    # CHANGE 3 — Wire PortfolioLedger SELL
                     capital_released = trade["qty"] * ltp
                     self.portfolio_ledger.record_sell(
                         capital_released=capital_released,
                         gross_pnl=pnl
                     )
 
-                    # Record completed execution result
                     self.decision_audit.record_result(
                         security_id=security_id,
                         result={
@@ -533,26 +476,18 @@ class Engine:
                         }
                     )
                     
-                    # Instantly clear structural risk indexes to free risk capacity
                     self.portfolio_risk_manager.remove_trade(symbol)
-                    
                     print(f"SELL : {symbol} @ {ltp:.2f} PnL:{pnl:.2f}")
 
-                    icon = "🔴"
-                    title = "SELL EXECUTED"
-
+                    icon, title = "🔴", "SELL EXECUTED"
                     if result == self.EXIT_TARGET:
-                        icon = "🟢"
-                        title = "TARGET HIT"
+                        icon, title = "🟢", "TARGET HIT"
                     elif result == self.EXIT_TIME:
-                        icon = "🟡"
-                        title = "TIME EXIT"
+                        icon, title = "🟡", "TIME EXIT"
                     elif result == self.EXIT_MANUAL:
-                        icon = "🚨"
-                        title = "MANUAL EXIT"
+                        icon, title = "🚨", "MANUAL EXIT"
                     elif result == self.EXIT_SYSTEM:
-                        icon = "⚠️"
-                        title = "SYSTEM EXIT"
+                        icon, title = "⚠️", "SYSTEM EXIT"
 
                     self.telegram.send(
                         f"{icon} {title}\n\n"
@@ -571,32 +506,21 @@ class Engine:
                     
                     self.trade_logger.log_trade(
                         datetime.now().strftime("%Y-%m-%d"),
-                        ltt,
-                        symbol,
-                        trade["entry"],
-                        ltp,
-                        trade["qty"],
-                        round(pnl, 2),
-                        result
+                        ltt, symbol, trade["entry"], ltp,
+                        trade["qty"], round(pnl, 2), result
                     )
 
                     self.position_manager.close_position(security_id, pnl)
                     self.open_position_manager.remove(security_id)
                     del self.trades[security_id]
                     
-                    # Required Fix #2 — Modified notification and tracking logic block
                     if self.trades:
                         self.position_recovery.save(self.trades)
                     else:
                         self.position_recovery.clear()
 
-                    # Notify only when Exit-All operation has finished
-                    if (
-                        self.trade_controller.is_exit_all_requested()
-                        and not self.trades
-                    ):
+                    if self.trade_controller.is_exit_all_requested() and not self.trades:
                         self.trade_controller.clear_exit_all()
-
                         self.telegram.send(
                             "✅ EXIT ALL COMPLETED\n\n"
                             "All open positions have been successfully closed.\n\n"
@@ -604,7 +528,6 @@ class Engine:
                         )
 
         finally:
-            # FIXED: Exactly one recorder call executed at the end of every tick trajectory.
             self.market_recorder.record(**self.system_snapshot())
             self.monitor.print_status()
             self.watchdog.check()
@@ -673,49 +596,29 @@ class Engine:
 
     def pause(self):
         self.trade_controller.disable_entries()
-        return {
-            "success": True,
-            "message": "New entries paused."
-        }
+        return {"success": True, "message": "New entries paused."}
 
     def resume(self):
         self.trade_controller.enable_entries()
-        return {
-            "success": True,
-            "message": "New entries resumed."
-        }
+        return {"success": True, "message": "New entries resumed."}
 
     def trading_off(self):
         self.trade_controller.disable_trading()
         self.trade_controller.disable_entries()
-
-        return {
-            "success": True,
-            "message": "Trading disabled."
-        }
+        return {"success": True, "message": "Trading disabled."}
 
     def trading_on(self):
         self.trade_controller.enable_trading()
         self.trade_controller.enable_entries()
-
-        return {
-            "success": True,
-            "message": "Trading enabled."
-        }
+        return {"success": True, "message": "Trading enabled."}
 
     def exit_all(self):
         self.trade_controller.request_exit_all()
+        return {"success": True, "message": "Exit All requested."}
 
-        return {
-            "success": True,
-            "message": "Exit All requested."
-        }
-
-    # CHANGE 4 — Add Ledger Status API
     def ledger(self):
         return self.portfolio_ledger.summary()
 
-    # CHANGE 5 — Add TradeController Status API
     def trade_controller_status(self):
         return self.trade_controller.status()
 
@@ -724,35 +627,16 @@ class Engine:
     # --------------------------------------------------
     def _process_market_news(self, news):
         try:
-            # ---------------------------------
-            # News Classification
-            # ---------------------------------
             classified_news = self.news_classifier.classify(news)
-
             if classified_news is None:
                 return
 
-            # ---------------------------------
-            # Impact Analysis
-            # ---------------------------------
             impact = self.impact_engine.evaluate(classified_news)
-
             if impact is None:
                 return
 
-            # ---------------------------------
-            # Catalyst Management
-            # ---------------------------------
             self.market_catalyst.update(impact)
-
-            # ---------------------------------
-            # Memory
-            # ---------------------------------
             self.market_memory.remember(impact)
-
-            # ---------------------------------
-            # Market Environment
-            # ---------------------------------
             self.market_environment.update(impact)
 
         except Exception as e:

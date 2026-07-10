@@ -177,7 +177,7 @@ class TradeSelectionEngine:
         return {
             "passed": True,
             "score": score,
-            "reasons": f"{strong_themes_count} Strong Theme(s)"
+            "reason": f"{strong_themes_count} Strong Theme(s)"
         }
 
     # --------------------------------------------------

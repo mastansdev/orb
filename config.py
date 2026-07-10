@@ -12,7 +12,7 @@ DECISION_TRACE = True
 # ==========================
 # ACCOUNT
 # ==========================
-CAPITAL = 10000000
+CAPITAL = 50000
 
 # ==========================
 # POSITION
@@ -21,9 +21,18 @@ RISK_MODE = "PERCENT"        # PERCENT / FIXED
 RISK_PER_TRADE = 0.01        # 1% of Capital
 FIXED_RISK = 1000            #  Used when RISK_MODE = "FIXED"
 
-MAX_CAPITAL_PER_TRADE = 100000
+MAX_CAPITAL_PER_TRADE = CAPITAL
 
-MAX_OPEN_POSITIONS = 999
+MAX_OPEN_POSITIONS = 20
+
+
+# ==========================
+# LIVE ACCOUNT
+# ==========================
+
+BROKER_ACCOUNT = "PRIMARY"
+
+LIVE_CAPITAL = 50000
 
 # ==========================
 # STRATEGY
@@ -47,20 +56,24 @@ DAILY_MAX_PROFIT = 50000
 # ==========================
 # ORDER
 # ==========================
-ORDER_TYPE = "STOP_LIMIT"
+ORDER_TYPE_MARKET = "MARKET"
+ORDER_TYPE_LIMIT = "LIMIT"
+ORDER_TYPE_STOP_LIMIT = "STOP_LIMIT"
+
+ORDER_TYPE = ORDER_TYPE_MARKET
 SLIPPAGE = 5
 
 # ==========================
-# TRADING
+# EXECUTION
 # ==========================
-TRADE_MODE = "PAPER"      # PAPER / LIVE
+TRADING_MODE = "LIVE"      # PAPER / LIVE
 PRODUCT_TYPE = "MIS"      # MIS / CNC / MTF
 BROKER = "DHAN"
 
 # ==========================
 # TEST
 # ==========================
-TEST_MODE = True
+TEST_MODE = False
 TEST_ORB_HIGH = 1300
 TEST_ORB_LOW = 1290
 
@@ -115,5 +128,25 @@ SECTOR_DATABASE_FILE = "Masterdata/sector_database.csv"
 
 BOT_NAME = "ORB AUTO TRADER"
 
+# ==========================
+# LIVE SAFETY
+# ==========================
 
-VERSION = "1.0.0-PAPER"
+LIVE_CONFIRMATION_REQUIRED = False
+
+ENABLE_ORDER_PLACEMENT = False
+
+ENABLE_AUTO_EXIT = True
+
+ENABLE_TELEGRAM_CONFIRMATION = True
+
+
+ENTRY_CUTOFF_TIME = "15:00"
+
+HARD_EXIT_TIME = "15:15"
+
+ORDER_RETRY_COUNT = 3
+
+API_TIMEOUT_SECONDS = 10
+
+VERSION = "2.0.0-LIVE-READY"
