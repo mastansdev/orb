@@ -1,0 +1,12 @@
+======================================================================
+Date : 2026-06-24 22:28:11.102079
+Error : division by zero
+
+Traceback (most recent call last):
+  File "D:\Projects\orb-auto-trader\test_error_logger.py", line 7, in <module>
+    x = 10 / 0
+        ~~~^~~
+ZeroDivisionError: division by zero
+
+======================================================================
+
