@@ -48,7 +48,7 @@ class NewsEvidenceBuilder:
         # Evidence
         # --------------------------------------------------
         return Evidence(
-            provider="NewsEngine",
+            provider="NEWS",
             recommendation=recommendation,
             score=score,
             confidence=max(

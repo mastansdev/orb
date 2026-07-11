@@ -21,7 +21,7 @@ Does NOT:
     • Execute Orders
     • Manage Portfolio
 
-Consumes evidence from ImpactEngine.
+Consumes ImpactResult objects produced by ImpactEngine.
 """
 
 from copy import deepcopy
@@ -33,6 +33,7 @@ from impact_rules import (
     REGIME_RISK_OFF,
     REGIME_VOLATILE,
 )
+from news_models import ImpactResult
 
 
 class MarketEnvironment:
@@ -64,16 +65,19 @@ class MarketEnvironment:
     # Update
     # --------------------------------------------------
 
-    def update(self, news):
+    def update(
+        self,
+        impact: ImpactResult
+    ):
 
-        news = deepcopy(news)
+        impact = deepcopy(impact)
 
-        regime = news.get("market_regime_hint")
+        regime = impact.market_regime_hint
 
         if regime is None:
             return self.current()
 
-        matched_rule = news.get("matched_rule")
+        matched_rule = impact.rule_name
 
         if matched_rule:
 
@@ -84,17 +88,14 @@ class MarketEnvironment:
 
         previous = self._environment
 
-        self._environment = self._calculate_environment(news)
+        self._environment = self._calculate_environment(impact)
 
         self._confidence = max(
             self._confidence,
-            news.get("confidence", 0)
+            impact.confidence
         )
 
-        self._market_score += news.get(
-            "market_score",
-            0
-        )
+        self._market_score += impact.market_score
 
         changed = previous != self._environment
 
@@ -121,9 +122,12 @@ class MarketEnvironment:
     # Internal
     # --------------------------------------------------
 
-    def _calculate_environment(self, news):
+    def _calculate_environment(
+        self,
+        impact: ImpactResult
+    ):
 
-        regime = news.get("market_regime_hint")
+        regime = impact.market_regime_hint
 
         if regime in (
 
@@ -143,7 +147,7 @@ class MarketEnvironment:
     # Read Only
     # --------------------------------------------------
 
-    def current(self):
+    def current(self) -> dict:
 
         return {
 
@@ -170,13 +174,38 @@ class MarketEnvironment:
 
     # --------------------------------------------------
 
-    def history(self):
+    def history(self) -> list:
 
         return list(self._history)
 
     # --------------------------------------------------
+    # Snapshot
+    # --------------------------------------------------
 
-    def stats(self):
+    def get_snapshot(self) -> dict:
+        """
+        Return a read-only snapshot for
+        IntelligenceEngine.
+        """
+
+        return {
+
+            "environment": self._environment,
+
+            "confidence": self._confidence,
+
+            "market_score": self._market_score,
+
+            "active_catalysts": list(
+                self._active_catalysts
+            ),
+
+            "history_count": len(self._history),
+        }
+
+    # --------------------------------------------------
+
+    def stats(self) -> dict:
 
         return {
 

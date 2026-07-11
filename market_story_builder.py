@@ -63,6 +63,8 @@ class MarketStoryBuilder:
             or "UNKNOWN",
             catalyst=classified_news.catalyst,
             category=classified_news.category,
+            subcategory=classified_news.subcategory,
+            event_type=classified_news.event_type,
             sector=classified_news.sector,
             industry=classified_news.industry,
             theme=classified_news.theme,

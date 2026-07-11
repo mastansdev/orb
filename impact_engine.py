@@ -3,7 +3,7 @@ Impact Engine
 
 Responsibilities
 ----------------
-Convert classified news into structured market impact
+Convert Market Stories into structured market impact
 using the institutional Impact Rules knowledge base.
 
 Owns:
@@ -24,12 +24,14 @@ This module is a thin interpreter over the
 Impact Rules knowledge base.
 """
 
-from copy import deepcopy
-
 from impact_rules import (
     IMPACT_RULES,
     IMPACT_LOW,
     REGIME_NEUTRAL,
+)
+from news_models import (
+    MarketStory,
+    ImpactResult,
 )
 
 
@@ -52,48 +54,56 @@ class ImpactEngine:
     # Public
     # --------------------------------------------------
 
-    def evaluate(self, news):
+    def evaluate(
+        self,
+        story: MarketStory
+    ) -> ImpactResult:
 
-        news = deepcopy(news)
-
-        rule_name, rule = self._find_rule(news)
+        rule_name, rule = self._find_rule(
+            story
+        )
 
         if rule is None:
 
-            self._apply_default(news)
+            result = self._apply_default(
+                story
+            )
 
             self._unmatched += 1
 
         else:
 
-            self._apply_rule(
-                news,
+            result = self._apply_rule(
+                story,
                 rule_name,
-                rule,
+                rule
             )
 
             self._matched += 1
 
         self._evaluated += 1
 
-        return news
+        return result
 
     # --------------------------------------------------
     # Rule Lookup
     # --------------------------------------------------
 
-    def _find_rule(self, news):
+    def _find_rule(
+        self,
+        story: MarketStory
+    ):
 
-        category = news.get("category")
-        sub_category = news.get("sub_category")
-        event_type = news.get("event_type")
+        category = story.category
+        subcategory = story.subcategory
+        event_type = story.event_type
 
         for rule_name, rule in IMPACT_RULES.items():
 
             if rule["category"] != category:
                 continue
 
-            if rule["sub_category"] != sub_category:
+            if rule["sub_category"] != subcategory:
                 continue
 
             if rule["event_type"] != event_type:
@@ -109,83 +119,110 @@ class ImpactEngine:
 
     def _apply_rule(
         self,
-        news,
+        story: MarketStory,
         rule_name,
         rule,
-    ):
+    ) -> ImpactResult:
 
-        news["impact_found"] = True
+        return ImpactResult(
 
-        news["matched_rule"] = rule_name
+            story_id=story.story_id,
+            
+            rule_name=rule_name,
 
-        news["market_impact"] = rule["market_impact"]
+            category=story.category,
 
-        news["market_score"] = rule["market_score"]
-        news["sector_score"] = rule["sector_score"]
-        news["stock_score"] = rule["stock_score"]
+            subcategory=story.subcategory,
 
-        news["confidence"] = rule["confidence"]
-        news["confidence_source"] = rule["confidence_source"]
+            event_type=story.event_type,
 
-        news["market_regime_hint"] = rule["market_regime_hint"]
 
-        news["expected_duration"] = rule["expected_duration"]
+            market_impact=rule["market_impact"],
 
-        news["direct_assets"] = list(
-            rule["direct_assets"]
-        )
+            market_score=rule["market_score"],
 
-        news["indirect_assets"] = list(
-            rule["indirect_assets"]
-        )
+            sector_score=rule["sector_score"],
 
-        news["bullish_sectors"] = list(
-            rule["bullish_sectors"]
-        )
+            stock_score=rule["stock_score"],
 
-        news["bearish_sectors"] = list(
-            rule["bearish_sectors"]
-        )
+            expected_duration=rule["expected_duration"],
 
-        news["historical_winners"] = list(
-            rule["historical_winners"]
-        )
+            confidence=rule["confidence"],
 
-        news["historical_losers"] = list(
-            rule["historical_losers"]
+            confidence_source=rule["confidence_source"],
+
+            market_regime_hint=rule["market_regime_hint"],
+
+            bullish_sectors=list(rule["bullish_sectors"]),
+
+            bearish_sectors=list(rule["bearish_sectors"]),
+
+            direct_assets=list(rule["direct_assets"]),
+
+            indirect_assets=list(rule["indirect_assets"]),
+
+            historical_winners=list(rule["historical_winners"]),
+
+            historical_losers=list(rule["historical_losers"]),
+
+            notes=[
+                f"Matched Rule={rule_name}"
+            ]
         )
 
     # --------------------------------------------------
     # Default
     # --------------------------------------------------
 
-    def _apply_default(self, news):
+    def _apply_default(
+        self,
+        story: MarketStory
+    ) -> ImpactResult:
 
-        news["impact_found"] = False
+        return ImpactResult(
 
-        news["matched_rule"] = None
+            story_id=story.story_id,
 
-        news["market_impact"] = IMPACT_LOW
+            rule_name="UNKNOWN",
 
-        news["market_score"] = 0
-        news["sector_score"] = 0
-        news["stock_score"] = 0
+            category=story.category,
 
-        news["confidence"] = 0
-        news["confidence_source"] = None
+            subcategory=story.subcategory,
+            
+            event_type=story.event_type,
 
-        news["market_regime_hint"] = REGIME_NEUTRAL
+            market_impact=IMPACT_LOW,
 
-        news["expected_duration"] = None
+            market_score=0,
 
-        news["direct_assets"] = []
-        news["indirect_assets"] = []
+            sector_score=0,
 
-        news["bullish_sectors"] = []
-        news["bearish_sectors"] = []
+            stock_score=0,
 
-        news["historical_winners"] = []
-        news["historical_losers"] = []
+            expected_duration="UNKNOWN",
+
+            confidence=0,
+
+            confidence_source="UNKNOWN",
+
+            market_regime_hint=REGIME_NEUTRAL,
+
+            bullish_sectors=[],
+
+            bearish_sectors=[],
+
+            direct_assets=[],
+
+            indirect_assets=[],
+
+            historical_winners=[],
+
+            historical_losers=[],
+
+            notes=[
+                "No matching impact rule."
+            ]
+        )
 
     # --------------------------------------------------
     # Statistics

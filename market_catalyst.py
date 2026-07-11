@@ -21,11 +21,12 @@ Does NOT:
     • Trigger Trades
     • Execute Orders
 
-Consumes evidence from ImpactEngine.
+Consumes ImpactResult objects produced by ImpactEngine.
 """
 
 from copy import deepcopy
 from datetime import datetime
+from news_models import ImpactResult
 
 
 class MarketCatalyst:
@@ -51,42 +52,45 @@ class MarketCatalyst:
     # Activate
     # --------------------------------------------------
 
-    def activate(self, news):
+    def activate(
+        self,
+        impact: ImpactResult
+    ):
 
-        news = deepcopy(news)
+        impact = deepcopy(impact)
 
-        rule = news.get("matched_rule")
+        rule = impact.rule_name
 
-        if not rule:
+        if not rule or rule == "UNKNOWN":
             return False
 
         catalyst = {
 
-            "rule": rule,
+            "rule": impact.rule_name,
 
             "activated_at": datetime.now(),
 
-            "category": news.get("category"),
+            "category": impact.category,
 
-            "sub_category": news.get("sub_category"),
+            "sub_category": impact.subcategory,
 
-            "event_type": news.get("event_type"),
+            "event_type": impact.event_type,
 
-            "market_regime": news.get("market_regime_hint"),
+            "market_regime": impact.market_regime_hint,
 
-            "market_impact": news.get("market_impact"),
+            "market_impact": impact.market_impact,
 
-            "market_score": news.get("market_score"),
+            "market_score": impact.market_score,
 
-            "sector_score": news.get("sector_score"),
+            "sector_score": impact.sector_score,
 
-            "stock_score": news.get("stock_score"),
+            "stock_score": impact.stock_score,
 
-            "confidence": news.get("confidence"),
+            "confidence": impact.confidence,
 
-            "strength": news.get("market_score", 0),
+            "strength": impact.market_score,
 
-            "priority": news.get("market_score", 0),
+            "priority": impact.market_score,
 
             "active": True,
         }
@@ -110,39 +114,30 @@ class MarketCatalyst:
     # Update
     # --------------------------------------------------
 
-    def update(self, news):
+    def update(
+        self,
+        impact: ImpactResult
+    ):
 
-        news = deepcopy(news)
+        impact = deepcopy(impact)
 
-        rule = news.get("matched_rule")
+        rule = impact.rule_name
 
-        if not rule:
+        if not rule or rule == "UNKNOWN":
             return False
 
         if rule not in self._active:
-            return self.activate(news)
+            return self.activate(impact)
 
         catalyst = self._active[rule]
 
-        catalyst["strength"] = news.get(
-            "market_score",
-            catalyst["strength"],
-        )
-
-        catalyst["confidence"] = news.get(
-            "confidence",
-            catalyst["confidence"],
-        )
-
-        catalyst["market_impact"] = news.get(
-            "market_impact",
-            catalyst["market_impact"],
-        )
-
-        catalyst["market_regime"] = news.get(
-            "market_regime_hint",
-            catalyst["market_regime"],
-        )
+        catalyst["strength"] = impact.market_score
+        catalyst["confidence"] = impact.confidence
+        catalyst["market_impact"] = impact.market_impact
+        catalyst["market_regime"] = impact.market_regime_hint
+        catalyst["market_score"] = impact.market_score
+        catalyst["sector_score"] = impact.sector_score
+        catalyst["stock_score"] = impact.stock_score
 
         self._history.append({
 
@@ -161,7 +156,10 @@ class MarketCatalyst:
     # Deactivate
     # --------------------------------------------------
 
-    def deactivate(self, rule):
+    def deactivate(
+        self,
+        rule: str
+    ):
 
         catalyst = self._active.pop(rule, None)
 
@@ -216,9 +214,33 @@ class MarketCatalyst:
 
     # --------------------------------------------------
 
-    def is_active(self, rule):
+    def is_active(
+        self,
+        rule: str
+    ) -> bool:
 
         return rule in self._active
+
+    # --------------------------------------------------
+    # Snapshot
+    # --------------------------------------------------
+
+    def get_snapshot(self) -> dict:
+        """
+        Return a read-only snapshot for
+        IntelligenceEngine.
+        """
+
+        return {
+
+            "active": deepcopy(self._active),
+
+            "strongest": self.strongest(),
+
+            "active_count": len(self._active),
+
+            "history_count": len(self._history),
+        }
 
     # --------------------------------------------------
     # Statistics

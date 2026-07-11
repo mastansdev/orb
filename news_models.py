@@ -205,7 +205,7 @@ class RawNews:
 class ProcessedNews:
     """
     News enriched by the News Engine.
-    Passed to Catalyst Processor.
+    Passed to NewsClassifier.
     """
 
     raw_news: RawNews
@@ -213,6 +213,8 @@ class ProcessedNews:
     processed_at: datetime = field(default_factory=datetime.now)
 
     themes: List[str] = field(default_factory=list)
+
+    text_categories: List[str] = field(default_factory=list)
 
     industries: List[str] = field(default_factory=list)
 
@@ -232,14 +234,54 @@ class ProcessedNews:
 
         self.notes.append(note)
 
-@dataclass
-class MarketStory:
 
-    name: str
+# ==========================================================
+# Classified News
+# ==========================================================
+
+@dataclass
+class ClassifiedNews:
+    """
+    News enriched with market intelligence.
+    Produced by NewsClassifier.
+    Consumed by MarketStoryBuilder.
+    """
+
+    # --------------------------------------------------
+    # Identity
+    # --------------------------------------------------
+
+    news_id: str
+
+    # --------------------------------------------------
+    # Original News
+    # --------------------------------------------------
+
+    headline: str
+
+    summary: str
+
+    source: NewsSource
+
+    published_at: datetime
+
+    received_at: datetime
+
+    # --------------------------------------------------
+    # Classification
+    # --------------------------------------------------
+
+    category: str
+
+    subcategory: str
+
+    event_type: str
 
     catalyst: str
 
-    category: str
+    # --------------------------------------------------
+    # Market Mapping
+    # --------------------------------------------------
 
     sector: str
 
@@ -247,18 +289,166 @@ class MarketStory:
 
     theme: str
 
+    affected_symbols: List[str]
+
+    affected_assets: List[str]
+
+    # --------------------------------------------------
+    # Intelligence
+    # --------------------------------------------------
+
+    priority: int
+
     confidence: float
 
-    priority: str
+    classification_method: str
+
+
+# ==========================================================
+# Market Story
+# ==========================================================
+
+@dataclass
+class MarketStory:
+    """
+    Living market narrative built from one or
+    more classified news events.
+    """
+
+    # --------------------------------------------------
+    # Identity
+    # --------------------------------------------------
+
+    story_id: str
+
+    # --------------------------------------------------
+    # Story
+    # --------------------------------------------------
+
+    name: str
+
+    catalyst: str
+
+    category: str
+
+    subcategory: str
+
+    event_type: str
+
+    sector: str
+
+    industry: str
+
+    theme: str
+
+    # --------------------------------------------------
+    # Intelligence
+    # --------------------------------------------------
+
+    confidence: float
+
+    priority: int
 
     lifecycle: str
 
     expected_duration: str
 
+    # --------------------------------------------------
+    # Relationships
+    # --------------------------------------------------
+
     supporting_news: List[str]
 
     affected_symbols: List[str]
 
+    # --------------------------------------------------
+    # Timeline
+    # --------------------------------------------------
+
     created_at: datetime
 
     updated_at: datetime
+
+    # --------------------------------------------------
+    # Analysis Notes
+    # --------------------------------------------------
+
+    notes: List[str] = field(default_factory=list)
+
+
+# ==========================================================
+# Impact Result
+# ==========================================================
+
+@dataclass
+class ImpactResult:
+    """
+    Market impact assessment generated
+    from a Market Story.
+    Produced by ImpactEngine.
+    Consumed by NewsEvidenceBuilder.
+    """
+
+    # --------------------------------------------------
+    # Story
+    # --------------------------------------------------
+
+    story_id: str
+
+    rule_name: str
+
+    category: str
+
+    subcategory: str
+
+    event_type: str
+
+    # --------------------------------------------------
+    # Impact
+    # --------------------------------------------------
+
+    market_impact: str
+
+    market_score: int
+
+    sector_score: int
+
+    stock_score: int
+
+    expected_duration: str
+
+    # --------------------------------------------------
+    # Rule Confidence
+    # --------------------------------------------------
+
+    confidence: float
+
+    confidence_source: str
+
+    market_regime_hint: str
+
+    # --------------------------------------------------
+    # Market Mapping
+    # --------------------------------------------------
+
+    bullish_sectors: List[str]
+
+    bearish_sectors: List[str]
+
+    direct_assets: List[str]
+
+    indirect_assets: List[str]
+
+    # --------------------------------------------------
+    # Historical Behaviour
+    # --------------------------------------------------
+
+    historical_winners: List[str]
+
+    historical_losers: List[str]
+
+    # --------------------------------------------------
+    # Analysis
+    # --------------------------------------------------
+
+    notes: List[str] = field(default_factory=list)

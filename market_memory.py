@@ -19,12 +19,15 @@ Does NOT:
     • Trigger Trades
     • Execute Orders
 
+Consumes ImpactResult objects produced by ImpactEngine.
+
 This module is the persistent memory layer of the
 Market Intelligence pipeline.
 """
 
 from copy import deepcopy
 from datetime import datetime
+from news_models import ImpactResult
 
 
 class MarketMemory:
@@ -37,11 +40,8 @@ class MarketMemory:
     # --------------------------------------------------
 
     def reset(self):
-
         self._history = []
-
         self._active = {}
-
         self._remembered = 0
         self._forgotten = 0
         self._expired = 0
@@ -50,46 +50,32 @@ class MarketMemory:
     # Remember
     # --------------------------------------------------
 
-    def remember(self, news):
-
-        news = deepcopy(news)
-
-        rule = news.get("matched_rule")
-
-        if not rule:
+    def remember(
+        self,
+        impact: ImpactResult
+    ):
+        impact = deepcopy(impact)
+        rule = impact.rule_name
+        
+        if not rule or rule == "UNKNOWN":
             return False
 
         event = {
-
             "timestamp": datetime.now(),
-
-            "rule": rule,
-
-            "category": news.get("category"),
-
-            "sub_category": news.get("sub_category"),
-
-            "event_type": news.get("event_type"),
-
-            "market_regime": news.get("market_regime_hint"),
-
-            "market_impact": news.get("market_impact"),
-
-            "market_score": news.get("market_score"),
-
-            "confidence": news.get("confidence"),
-
-            "confidence_source": news.get(
-                "confidence_source"
-            ),
-
+            "rule": impact.rule_name,
+            "category": impact.category,
+            "sub_category": impact.subcategory,
+            "event_type": impact.event_type,
+            "market_regime": impact.market_regime_hint,
+            "market_impact": impact.market_impact,
+            "market_score": impact.market_score,
+            "confidence": impact.confidence,
+            "confidence_source": impact.confidence_source,
             "active": True,
         }
 
         self._history.append(event)
-
         self._active[rule] = event
-
         self._remembered += 1
 
         return True
@@ -98,15 +84,16 @@ class MarketMemory:
     # Forget
     # --------------------------------------------------
 
-    def forget(self, rule):
-
+    def forget(
+        self,
+        rule: str
+    ):
         event = self._active.pop(rule, None)
 
         if event is None:
             return False
 
         event["active"] = False
-
         self._forgotten += 1
 
         return True
@@ -115,15 +102,16 @@ class MarketMemory:
     # Expire
     # --------------------------------------------------
 
-    def expire(self, rule):
-
+    def expire(
+        self,
+        rule: str
+    ):
         event = self._active.pop(rule, None)
 
         if event is None:
             return False
 
         event["active"] = False
-
         self._expired += 1
 
         return True
@@ -133,40 +121,54 @@ class MarketMemory:
     # --------------------------------------------------
 
     def active(self):
-
         return deepcopy(self._active)
 
     # --------------------------------------------------
 
     def history(self):
-
         return deepcopy(self._history)
 
     # --------------------------------------------------
 
     def active_rules(self):
-
         return list(self._active.keys())
 
     # --------------------------------------------------
 
-    def is_active(self, rule):
-
+    def is_active(
+        self,
+        rule: str
+    ) -> bool:
         return rule in self._active
+
+    # --------------------------------------------------
+    # Snapshot
+    # --------------------------------------------------
+
+    def get_snapshot(self) -> dict:
+        """
+        Return a read-only snapshot for
+        IntelligenceEngine.
+        """
+
+        return {
+
+            "active": deepcopy(self._active),
+
+            "active_rules": self.active_rules(),
+
+            "history_count": len(self._history),
+
+            "remembered": self._remembered,
+        }
 
     # --------------------------------------------------
 
     def stats(self):
-
         return {
-
             "remembered": self._remembered,
-
             "active": len(self._active),
-
             "forgotten": self._forgotten,
-
             "expired": self._expired,
-
             "history": len(self._history),
         }

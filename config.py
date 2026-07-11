@@ -66,7 +66,7 @@ SLIPPAGE = 5
 # ==========================
 # EXECUTION
 # ==========================
-TRADING_MODE = "LIVE"      # PAPER / LIVE
+TRADING_MODE = "PAPER"      # PAPER / LIVE
 PRODUCT_TYPE = "MIS"      # MIS / CNC / MTF
 BROKER = "DHAN"
 

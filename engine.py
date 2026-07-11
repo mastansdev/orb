@@ -79,17 +79,25 @@ class Engine:
         # --------------------------------------------------
         # Market Intelligence Setup
         # --------------------------------------------------
-        self.news_engine = NewsEngine(self)
-        self.news_collector = NewsCollector()
-        self.news_classifier = NewsClassifier()
-        self.impact_engine = ImpactEngine()
+
+        # Shared Market Intelligence State
         self.market_catalyst = MarketCatalyst()
         self.market_memory = MarketMemory()
         self.market_environment = MarketEnvironment()
 
+        # News Intelligence Pipeline
+        self.news_engine = NewsEngine(self)
+        self.news_collector = NewsCollector()
+
         # Register News Sources
         self.news_engine.register_collector(self.news_collector)
 
+        # Legacy components retained temporarily during migration.
+        # They will be removed after the NewsEngine migration
+        # is fully completed and verified.
+        self.news_classifier = NewsClassifier()
+        self.impact_engine = ImpactEngine()
+        
         # Build structural registration layers first
         self.registry = SystemRegistry()
         self.intelligence_engine = IntelligenceEngine(self.registry)
@@ -623,8 +631,15 @@ class Engine:
         return self.trade_controller.status()
 
     # --------------------------------------------------
-    # Market Intelligence Pipeline
+    # Legacy Market Intelligence Pipeline
+    # 
+    # Deprecated:
+    # orchestrated inside NewsEngine.process().
+    #
+    # This method is retained temporarily during
+    # migration and should not be used.
     # --------------------------------------------------
+
     def _process_market_news(self, news):
         try:
             classified_news = self.news_classifier.classify(news)

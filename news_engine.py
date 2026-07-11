@@ -15,7 +15,8 @@ Responsibilities
 4. Deduplicate news
 5. Queue incoming news
 6. Persist raw news
-7. Forward to News Classifier
+7. Orchestrate the complete News Intelligence pipeline
+8. Return standardized Evidence objects
 
 This engine NEVER:
 - Executes trades
@@ -32,8 +33,20 @@ import hashlib
 import sqlite3
 from typing import List
 
-from news_models import RawNews
+from news_models import (
+    RawNews,
+    ProcessedNews,
+)
 from news_classifier import NewsClassifier
+from market_story_builder import (
+    MarketStoryBuilder,
+)
+from impact_engine import (
+    ImpactEngine,
+)
+from news_evidence_builder import (
+    NewsEvidenceBuilder,
+)
 
 
 class NewsEngine:
@@ -47,6 +60,16 @@ class NewsEngine:
         self.news_queue = deque()
 
         self.classifier = NewsClassifier()
+        self.story_builder = MarketStoryBuilder()
+        self.impact_engine = ImpactEngine()
+        
+        # Market Intelligence State
+        # Use the shared instances owned by Engine.
+        self.market_catalyst = engine.market_catalyst
+        self.market_memory = engine.market_memory
+        self.market_environment = engine.market_environment
+        
+        self.evidence_builder = NewsEvidenceBuilder()
 
         self.db = sqlite3.connect(
             "news_engine.db",
@@ -132,18 +155,89 @@ class NewsEngine:
     # --------------------------------------------------
 
     def process(self):
+        """
+        Process queued RawNews through the complete
+        News Intelligence pipeline.
 
-        processed = []
+        Returns:
+            List[Evidence]
+        """
+
+        evidence_list = []
 
         while self.news_queue:
 
+            # ----------------------------------------------
+            # Raw News
+            # ----------------------------------------------
             raw_news = self.news_queue.popleft()
 
-            self.engine._process_market_news(raw_news)
+            # ----------------------------------------------
+            # Processed News
+            # ----------------------------------------------
+            processed_news = ProcessedNews(
+                raw_news=raw_news
+            )
 
-            processed.append(raw_news)
+            # ----------------------------------------------
+            # Classified News
+            # ----------------------------------------------
+            classified_news = self.classifier.classify(
+                processed_news
+            )
 
-        return processed
+            # ----------------------------------------------
+            # Market Stories
+            # ----------------------------------------------
+            # TODO:
+            # MarketStoryBuilder currently returns all active stories.
+            # Future version should return only newly created or
+            # updated stories to avoid duplicate evidence generation.
+            stories = self.story_builder.build(
+                [classified_news]
+            )
+
+            # ----------------------------------------------
+            # Impact
+            # ----------------------------------------------
+            for story in stories:
+
+                impact = self.impact_engine.evaluate(
+                    story
+                )
+
+                # ------------------------------------------
+                # Update Market Intelligence State
+                # ------------------------------------------
+
+                self.market_catalyst.activate(
+                    impact
+                )
+
+                self.market_memory.remember(
+                    impact
+                )
+
+                self.market_environment.update(
+                    impact
+                )
+
+                # ------------------------------------------
+                # Evidence
+                # ------------------------------------------
+
+                evidence = self.evidence_builder.build(
+                    story,
+                    impact
+                )
+
+                # Evidence is returned to the caller.
+                # Brain integration is handled by engine.py.
+                evidence_list.append(
+                    evidence
+                )
+
+        return evidence_list
 
     # --------------------------------------------------
 
@@ -176,7 +270,6 @@ class NewsEngine:
         return hashlib.sha256(
 
             text.encode()
-
         ).hexdigest()
 
     # --------------------------------------------------
