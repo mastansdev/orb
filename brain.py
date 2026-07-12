@@ -691,7 +691,7 @@ class Brain:
 
             if intelligence.dominant_theme:
 
-                theme = intelligence.dominant_theme anchor
+                theme = intelligence.dominant_theme 
 
                 theme_strength.setdefault(
                     theme,
