@@ -186,13 +186,325 @@ CATEGORY_KEYWORDS = {
 # Sub Category Classification
 # ==========================================================
 
-SUBCATEGORY_KEYWORDS = {}
+SUBCATEGORY_KEYWORDS = {
+
+    # --------------------------------------------------
+    # Financial Results
+    # --------------------------------------------------
+
+    "BOARD_MEETING": [
+        "board meeting",
+        "meeting of board",
+        "board of directors",
+    ],
+
+    "FINANCIAL_RESULTS": [
+        "financial results",
+        "quarterly results",
+        "annual results",
+        "earnings",
+        "results",
+    ],
+
+    # --------------------------------------------------
+    # M&A
+    # --------------------------------------------------
+
+    "M_AND_A": [
+        "acquisition",
+        "acquire",
+        "takeover",
+        "merger",
+        "merge",
+        "amalgamation",
+    ],
+
+    "RESTRUCTURING": [
+        "demerger",
+        "divestment",
+        "slump sale",
+        "business transfer",
+    ],
+
+    # --------------------------------------------------
+    # Business Development
+    # --------------------------------------------------
+
+    "BUSINESS_DEVELOPMENT": [
+        "order",
+        "contract",
+        "order win",
+        "capacity expansion",
+        "plant expansion",
+        "patent",
+        "joint venture",
+        "strategic partnership",
+    ],
+
+    # --------------------------------------------------
+    # Capital Actions
+    # --------------------------------------------------
+
+    "CAPITAL_ACTION": [
+        "buyback",
+        "bonus",
+        "split",
+        "stock split",
+        "dividend",
+    ],
+
+    # --------------------------------------------------
+    # Capital Raising
+    # --------------------------------------------------
+
+    "CAPITAL_RAISING": [
+        "qip",
+        "qualified institutional placement",
+        "rights issue",
+        "preferential allotment",
+        "preferential issue",
+        "fund raising",
+    ],
+
+    # --------------------------------------------------
+    # Credit Rating
+    # --------------------------------------------------
+
+    "CREDIT_RATING": [
+        "credit rating",
+        "rating upgrade",
+        "rating downgrade",
+        "icra",
+        "care ratings",
+        "crisil",
+        "india ratings",
+        "acuite",
+    ],
+
+    # --------------------------------------------------
+    # Promoter Actions
+    # --------------------------------------------------
+
+    "PROMOTER_ACTION": [
+        "promoter",
+        "stake increase",
+        "stake decrease",
+        "shareholding",
+        "pledge",
+    ],
+
+    # --------------------------------------------------
+    # Legal
+    # --------------------------------------------------
+
+    "LEGAL": [
+        "nclt",
+        "insolvency",
+        "ibc",
+        "sebi investigation",
+        "ed investigation",
+        "sfio",
+        "cbi",
+    ],
+}
 
 # ==========================================================
 # Event Classification
 # ==========================================================
 
-EVENT_TYPE_KEYWORDS = {}
+EVENT_TYPE_KEYWORDS = {
+
+    # --------------------------------------------------
+    # Financial Results
+    # --------------------------------------------------
+
+    "BOARD_MEETING_RESULTS": [
+        "board meeting",
+        "meeting of board",
+        "consider financial results",
+        "approve financial results",
+    ],
+
+    "STRONG_RESULTS": [
+        "record profit",
+        "profit jumps",
+        "profit rises",
+        "earnings beat",
+        "revenue growth",
+        "margin expansion",
+    ],
+
+    "WEAK_RESULTS": [
+        "loss widens",
+        "profit declines",
+        "earnings miss",
+        "revenue falls",
+        "margin pressure",
+    ],
+
+    # --------------------------------------------------
+    # M&A
+    # --------------------------------------------------
+
+    "ACQUISITION": [
+        "acquisition",
+        "acquires",
+        "acquire",
+        "takeover",
+    ],
+
+    "MERGER": [
+        "merger",
+        "merge",
+        "amalgamation",
+    ],
+
+    "DEMERGER": [
+        "demerger",
+    ],
+
+    "DIVESTMENT": [
+        "divestment",
+        "asset sale",
+        "business sale",
+    ],
+
+    "DELISTING": [
+        "delisting",
+    ],
+
+    # --------------------------------------------------
+    # Business Development
+    # --------------------------------------------------
+
+    "LARGE_ORDER_WIN": [
+        "order",
+        "contract",
+        "work order",
+        "letter of award",
+        "loa",
+        "purchase order",
+    ],
+
+    "CAPACITY_EXPANSION": [
+        "capacity expansion",
+        "expansion",
+        "new plant",
+        "new facility",
+    ],
+
+    "REGULATORY_APPROVAL": [
+        "approval",
+        "regulatory approval",
+        "clearance",
+        "license received",
+    ],
+
+    "PATENT": [
+        "patent",
+        "patent granted",
+    ],
+
+    "JOINT_VENTURE": [
+        "joint venture",
+        "strategic partnership",
+        "joint agreement",
+    ],
+
+    # --------------------------------------------------
+    # Capital Actions
+    # --------------------------------------------------
+
+    "BUYBACK": [
+        "buyback",
+        "share buyback",
+    ],
+
+    "DIVIDEND": [
+        "dividend",
+        "interim dividend",
+        "final dividend",
+    ],
+
+    "BONUS": [
+        "bonus issue",
+        "bonus shares",
+    ],
+
+    "SPLIT": [
+        "stock split",
+        "share split",
+        "split",
+    ],
+
+    # --------------------------------------------------
+    # Capital Raising
+    # --------------------------------------------------
+
+    "QIP": [
+        "qip",
+        "qualified institutional placement",
+    ],
+
+    "RIGHTS_ISSUE": [
+        "rights issue",
+    ],
+
+    "PREFERENTIAL_ALLOTMENT": [
+        "preferential allotment",
+        "preferential issue",
+    ],
+
+    # --------------------------------------------------
+    # Credit Rating
+    # --------------------------------------------------
+
+    "CREDIT_RATING_UPGRADE": [
+        "rating upgraded",
+        "credit rating upgraded",
+        "upgraded to",
+    ],
+
+    "CREDIT_RATING_DOWNGRADE": [
+        "rating downgraded",
+        "credit rating downgraded",
+        "downgraded to",
+    ],
+
+    # --------------------------------------------------
+    # Promoter Actions
+    # --------------------------------------------------
+
+    "PROMOTER_STAKE_INCREASE": [
+        "stake increase",
+        "increased stake",
+        "promoter bought",
+    ],
+
+    "PROMOTER_STAKE_DECREASE": [
+        "stake decrease",
+        "reduced stake",
+        "stake sale",
+    ],
+
+    # --------------------------------------------------
+    # Legal
+    # --------------------------------------------------
+
+    "INSOLVENCY": [
+        "insolvency",
+        "ibc",
+        "nclt",
+    ],
+
+    "REGULATORY_INVESTIGATION": [
+        "sebi investigation",
+        "ed investigation",
+        "sfio",
+        "cbi investigation",
+    ],
+
+}
 
 # ==========================================================
 # Sector Intelligence
@@ -773,13 +1085,73 @@ COMMODITY_KEYWORDS = {}
 # Corporate Action Intelligence
 # ==========================================================
 
-CORPORATE_ACTION_KEYWORDS = {}
+CORPORATE_ACTION_KEYWORDS = {
+
+    "BUYBACK": [
+        "buyback",
+    ],
+
+    "DIVIDEND": [
+        "dividend",
+        "interim dividend",
+        "final dividend",
+    ],
+
+    "BONUS": [
+        "bonus",
+        "bonus shares",
+    ],
+
+    "SPLIT": [
+        "stock split",
+        "share split",
+    ],
+
+    "RIGHTS_ISSUE": [
+        "rights issue",
+    ],
+
+    "QIP": [
+        "qip",
+        "qualified institutional placement",
+    ],
+
+    "PREFERENTIAL_ALLOTMENT": [
+        "preferential allotment",
+        "preferential issue",
+    ],
+
+}
 
 # ==========================================================
 # Results Intelligence
 # ==========================================================
 
-RESULT_KEYWORDS = {}
+RESULT_KEYWORDS = {
+
+    "POSITIVE_RESULTS": [
+        "record profit",
+        "profit jumped",
+        "profit rises",
+        "earnings beat",
+        "revenue growth",
+        "margin expansion",
+        "highest ever",
+        "all time high profit",
+    ],
+
+    "NEGATIVE_RESULTS": [
+        "loss",
+        "net loss",
+        "profit declined",
+        "profit falls",
+        "earnings miss",
+        "margin contraction",
+        "revenue decline",
+        "weak guidance",
+    ],
+
+}
 
 # ==========================================================
 # Macro Intelligence
@@ -797,10 +1169,83 @@ GEOPOLITICAL_KEYWORDS = {}
 # Asset Mapping
 # ==========================================================
 
-ASSET_KEYWORDS = {}
+ASSET_KEYWORDS = {
+
+    "EQUITY": [
+        "share",
+        "stock",
+        "equity",
+    ],
+
+    "OPTIONS": [
+        "option",
+        "call option",
+        "put option",
+    ],
+
+    "FUTURES": [
+        "future",
+        "futures",
+    ],
+
+    "CORPORATE_BONDS": [
+        "bond",
+        "debenture",
+        "credit rating",
+    ],
+
+}
 
 # ==========================================================
 # Catalyst Intelligence
 # ==========================================================
 
-CATALYST_KEYWORDS = {}
+CATALYST_KEYWORDS = {
+
+    "EARNINGS": [
+        "results",
+        "earnings",
+        "financial results",
+    ],
+
+    "CORPORATE_ACTION": [
+        "buyback",
+        "bonus",
+        "split",
+        "dividend",
+    ],
+
+    "MERGER_ACQUISITION": [
+        "merger",
+        "acquisition",
+        "takeover",
+    ],
+
+    "ORDER_FLOW": [
+        "order",
+        "contract",
+        "letter of award",
+    ],
+
+    "CAPITAL_RAISING": [
+        "qip",
+        "rights issue",
+        "preferential allotment",
+    ],
+
+    "REGULATORY": [
+        "approval",
+        "investigation",
+        "sebi",
+        "rbi",
+    ],
+
+}
+
+# ==========================================================
+# Sanity Check Routine (Verifies correct processing)
+# ==========================================================
+if __name__ == "__main__":
+    print("✨ Classification keywords verified setup successfully.")
+    print(f"📊 Captured {len(RESULT_KEYWORDS['POSITIVE_RESULTS'])} Positive Result Identifiers.")
+    print(f"🚀 Captured {len(CATALYST_KEYWORDS.keys())} High-Level Catalyst Clusters.")

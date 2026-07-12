@@ -186,7 +186,7 @@ class MarketStoryBuilder:
 
     # --------------------------------------------------
     def _expire_story(
-        self
+        self,
     ):
         """
         Remove stories that are no longer
@@ -215,18 +215,19 @@ class MarketStoryBuilder:
         self._expire_story()
         
         # --------------------------------------------------
+        new_or_updated_stories = []
         for news in news_items:
             story = self._find_matching_story(news)
             if story:
-                self._merge_story(
+                story = self._merge_story(
                     story,
                     news
                 )
             else:
-                self._create_story(
+                story = self._create_story(
                     news
                 )
-        # --------------------------------------------------
-        return list(
-            self.active_stories.values()
-        )
+            new_or_updated_stories.append(
+                story
+            )
+        return new_or_updated_stories

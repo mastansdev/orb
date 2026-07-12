@@ -117,6 +117,55 @@ telegram_thread.start()
 
 print("Telegram Command Center Started")
 
+# --------------------------------------------------
+# NEWS INTELLIGENCE SCHEDULER
+# --------------------------------------------------
+def news_scheduler():
+    """
+    Periodically collect and process market news.
+
+    Runs independently from the live trading
+    thread so news processing never blocks
+    tick handling.
+    """
+
+    while True:
+
+        try:
+
+            print("[NEWS] Scheduler Wakeup")
+
+            collected = engine.news_engine.collect()
+
+            print(f"[NEWS] Collected = {collected}")
+
+            if collected > 0:
+
+                evidence = engine.news_engine.process()
+                
+
+                print(
+                    f"[NEWS] Evidence = {len(evidence)}"
+                )
+
+        except Exception as e:
+
+             print("\n========== NEWS TRACEBACK ==========")
+             traceback.print_exc()
+             print("====================================\n")
+
+        print("[NEWS] Scheduler Sleeping")
+
+        time.sleep(60)
+
+threading.Thread(
+    target=news_scheduler,
+    daemon=True,
+    name="NewsScheduler"
+).start()
+
+print("News Intelligence Scheduler Started")
+
 startup_message_sent = False
 
 while True:

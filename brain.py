@@ -1103,7 +1103,8 @@ class Brain:
     def evaluate(
         self,
         symbol: str,
-        evidence_list: List[Evidence]
+        evidence_list: List[Evidence],
+        conviction_snapshot=None
     ) -> Decision:
         """
         Main Brain evaluation pipeline.
@@ -1126,6 +1127,16 @@ class Brain:
                 evidence_used=0
 
             )
+
+        # --------------------------------------------------
+        # Conviction Snapshot (Future Integration)
+        # --------------------------------------------------
+        if conviction_snapshot is not None:
+
+            # Store the latest evidence readiness snapshot.
+            # This is informational for now and will be used
+            # by future Brain intelligence layers.
+            self.latest_conviction_snapshot = conviction_snapshot
 
         # --------------------------------------------------
         # Evaluate Opportunity

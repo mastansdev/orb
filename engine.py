@@ -42,7 +42,8 @@ from market_recorder import MarketRecorder
 from portfolio_ledger import PortfolioLedger
 
 # Market Intelligence Collectors & Models
-from collectors.news_collector import NewsCollector
+from collectors.news_rss_collector import NewsRSSCollector
+from collectors.bse_corporate_collector import BSECorporateCollector
 from news_classifier import NewsClassifier
 from impact_engine import ImpactEngine
 from market_catalyst import MarketCatalyst
@@ -87,10 +88,16 @@ class Engine:
 
         # News Intelligence Pipeline
         self.news_engine = NewsEngine(self)
-        self.news_collector = NewsCollector()
+        self.news_collector = NewsRSSCollector()
+        self.bse_corporate_collector = BSECorporateCollector()
+
 
         # Register News Sources
         self.news_engine.register_collector(self.news_collector)
+        
+        self.news_engine.register_collector(
+            self.bse_corporate_collector
+        )
 
         # Legacy components retained temporarily during migration.
         # They will be removed after the NewsEngine migration
@@ -319,12 +326,39 @@ class Engine:
                         symbol, ltp, orb, intelligence
                     )
 
-                    print("\n========== TRADE SELECTION ==========")
-                    print(f"Symbol    : {symbol}")
-                    print(f"Selected  : {decision['selected']}")
-                    print(f"Score     : {decision['score']}")
-                    print(f"Reasons   : {decision['reasons']}")
-                    print("=====================================\n")
+                    # --- Issue 1 Fix: Defensive None-Guard Exception Handling ---
+                    if decision is None:
+                        print(f"⚠️ CRITICAL: TradeSelectionEngine returned None for {symbol}.")
+                        decision = {
+                            "selected": False,
+                            "score": 0,
+                            "reasons": ["Brain returned no decision or raised an internal exception"],
+                            "brain_decision": None
+                        }
+
+                    # Safely extract brain decision object framework
+                    brain = decision.get("brain_decision") if isinstance(decision, dict) else None
+
+                    # --- Issue 2 Fix: Brain-centric logging with clean Enum Unwrapping ---
+                    if brain:
+                        action_obj = getattr(brain, "action", None)
+                        action_val = action_obj.value if hasattr(action_obj, "value") else action_obj
+                        
+                        print("\n========== BRAIN DECISION ==========")
+                        print(f"Symbol      : {symbol}")
+                        print(f"Action      : {action_val if action_val is not None else 'N/A'}")
+                        print(f"Confidence  : {getattr(brain, 'confidence', 'N/A')}")
+                        print(f"Score       : {getattr(brain, 'score', 'N/A')}")
+                        print(f"Reasons     : {getattr(brain, 'reasons', 'N/A')}")
+                        print(f"Warnings    : {getattr(brain, 'warnings', 'N/A')}")
+                        print("===================================\n")
+                    else:
+                        print("\n========== TRADE SELECTION ==========")
+                        print(f"Symbol    : {symbol}")
+                        print(f"Selected  : {decision.get('selected', False)}")
+                        print(f"Score     : {decision.get('score', 0)}")
+                        print(f"Reasons   : {decision.get('reasons', ['No details provided'])}")
+                        print("=====================================\n")
 
                     if decision is not None:
                         self.decision_audit.record_decision(
@@ -333,7 +367,17 @@ class Engine:
                             decision=decision
                         )
 
-                    if decision is None or not decision["selected"]:
+                    # --- Proactive rejection debug framework with Enum Unwrapping ---
+                    if not decision.get("selected", False):
+                        if brain:
+                            action_obj = getattr(brain, "action", None)
+                            action_val = action_obj.value if hasattr(action_obj, "value") else action_obj
+                            
+                            print(f"❌ BRAIN REJECTED : {symbol}")
+                            print(f"Action  : {action_val if action_val is not None else 'N/A'}")
+                            print(f"Reasons : {getattr(brain, 'reasons', 'N/A')}\n")
+                        else:
+                            print(f"❌ ENGINE SKIPPED : {symbol} - Reason: {decision.get('reasons', ['Fallback criteria not met'])}")
                         return
 
                     # Validate macro structural layout risk constraints

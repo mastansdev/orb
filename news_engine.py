@@ -134,6 +134,12 @@ class NewsEngine:
 
                         if not self._is_duplicate(news):
 
+                            print(
+                                f"[NEWS ACCEPTED] "
+                                f"{news.source.value} | "
+                                f"{news.headline}"
+                            )
+
                             self.news_queue.append(news)
 
                             self._store(news)

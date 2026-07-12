@@ -101,17 +101,17 @@ class NewsEvidenceBuilder:
         # --------------------------------------------------
         # Market Impact
         # --------------------------------------------------
-        score += impact.get("market_score", 0) * 3
+        score += impact.market_score * 3
 
         # --------------------------------------------------
         # Sector Impact
         # --------------------------------------------------
-        score += impact.get("sector_score", 0) * 2
+        score += impact.sector_score * 2
 
         # --------------------------------------------------
         # Stock Impact
         # --------------------------------------------------
-        score += impact.get("stock_score", 0)
+        score += impact.stock_score
 
         # --------------------------------------------------
         # Normalize
@@ -154,9 +154,9 @@ class NewsEvidenceBuilder:
         # --------------------------------------------------
         # Impact
         # --------------------------------------------------
-        if impact.get("market_impact"):
+        if getattr(impact, "market_impact", None):
             parts.append(
-                f"Impact={impact['market_impact']}"
+                f"Impact={impact.market_impact}"
             )
 
         # --------------------------------------------------
@@ -178,9 +178,9 @@ class NewsEvidenceBuilder:
         # --------------------------------------------------
         # Duration
         # --------------------------------------------------
-        if impact.get("expected_duration"):
+        if getattr(impact, "expected_duration", None):
             parts.append(
-                f"Duration={impact['expected_duration']}"
+                f"Duration={impact.expected_duration}"
             )
 
         return " | ".join(parts)

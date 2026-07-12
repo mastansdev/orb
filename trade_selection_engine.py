@@ -2,6 +2,7 @@ from config import MIN_ORB_RANGE_PERCENT
 from evidence_builder import EvidenceBuilder
 from evidence_validator import EvidenceValidator
 from conviction_engine import ConvictionEngine
+from brain import Brain, DecisionAction
 
 class TradeSelectionEngine:
 
@@ -13,6 +14,7 @@ class TradeSelectionEngine:
         self.evidence_builder = EvidenceBuilder()
         self.evidence_validator = EvidenceValidator()
         self.conviction_engine = ConvictionEngine()
+        self.brain = Brain()
 
     # --------------------------------------------------
 
@@ -26,50 +28,47 @@ class TradeSelectionEngine:
         self.breakouts += 1
 
         # ---------------------------------
+        # Structural ORB Validation (Early Gate)
+        # ---------------------------------
+        orb_result = self._score_orb(orb)
+        if not orb_result["passed"]:
+            self.skipped += 1
+            return self._build_decision(
+                selected=False,
+                score=0,
+                reasons=[orb_result["reason"]],
+                brain_decision=None
+            )
+
+        # ---------------------------------
         # Institutional Decision Pipeline
         # ---------------------------------
         evidence = self.evidence_builder.build(intelligence)
         validated_evidence = self.evidence_validator.validate(evidence)
         conviction = self.conviction_engine.evaluate(validated_evidence)
 
-        # Extract narrower scope payload
-        symbol_intelligence = intelligence.get("symbol", {})
-
         # ---------------------------------
-        # Evaluation Pipeline
+        # Brain Evaluation (Shadow Mode)
         # ---------------------------------
-        score = 0
-        reasons = []
+        brain_decision = self.brain.evaluate(
+            symbol=symbol,
+            evidence_list=validated_evidence,
+            conviction_snapshot=conviction
+        )
 
-        # Define sequential evaluation filters targeted at symbol intelligence
-        filters = [
-            ("orb", lambda: self._score_orb(orb)),
-            ("sector", lambda: self._score_generic_metric(symbol_intelligence, "sector", "Sector")),
-            ("industry", lambda: self._score_generic_metric(symbol_intelligence, "industry", "Industry")),
-            ("relative_strength", lambda: self._score_generic_metric(symbol_intelligence, "relative_strength", "RS")),
-            ("theme", lambda: self._score_theme(symbol_intelligence))
-        ]
+        selected = (
+            brain_decision.action == DecisionAction.BUY
+        )
+        if selected:
+            self.selected += 1
+        else:
+            self.skipped += 1
 
-        for filter_name, filter_func in filters:
-            result = filter_func()
-            
-            if not result["passed"]:
-                self.skipped += 1
-                reasons.append(result["reason"])
-                return self._build_decision(
-                    selected=False,
-                    score=score, 
-                    reasons=reasons
-                )
-            
-            score += result["score"]
-            reasons.append(result["reason"])
-
-        self.selected += 1
         return self._build_decision(
-            selected=True,
-            score=score,
-            reasons=reasons
+            selected=selected,
+            score=brain_decision.score,
+            reasons=brain_decision.reasons,
+            brain_decision=brain_decision
         )
 
     # --------------------------------------------------
@@ -78,12 +77,14 @@ class TradeSelectionEngine:
         self,
         selected,
         score,
-        reasons
+        reasons,
+        brain_decision=None
     ):
         return {
             "selected": selected,
             "score": score,
-            "reasons": reasons
+            "reasons": reasons,
+            "brain_decision": brain_decision
         }
 
     # --------------------------------------------------
@@ -112,72 +113,6 @@ class TradeSelectionEngine:
             "passed": True,
             "score": 100,
             "reason": f"ORB Range {orb_range_percent:.2f}%"
-        }
-
-    # --------------------------------------------------
-
-    def _score_generic_metric(
-        self, 
-        symbol_intelligence, 
-        key, 
-        display_name
-    ):
-        """Consolidates scoring architecture for Sector, Industry, and Relative Strength."""
-        data = symbol_intelligence.get(key) or {}
-
-        if not data:
-            return {
-                "passed": False,
-                "score": 0,
-                "reason": f"{display_name} data unavailable"
-            }
-
-        status = data.get("status")
-        rank = data.get("rank", "-")
-
-        if status == "STRONG":
-            return {
-                "passed": True,
-                "score": 100,
-                "reason": f"Strong {display_name} (Rank {rank})"
-            }
-
-        if status == "NEUTRAL":
-            return {
-                "passed": True,
-                "score": 50,
-                "reason": f"Neutral {display_name} (Rank {rank})"
-            }
-
-        return {
-            "passed": False,
-            "score": 0,
-            "reason": f"Weak {display_name} ({status})"
-        }
-
-    # --------------------------------------------------
-
-    def _score_theme(
-        self,
-        symbol_intelligence
-    ):
-        themes = symbol_intelligence.get("theme") or []
-        strong_themes_count = sum(1 for theme in themes if theme.get("status") == "STRONG")
-
-        if strong_themes_count == 0:
-            return {
-                "passed": True,
-                "score": 0,
-                "reason": "No Strong Themes"
-            }
-
-        score_mapping = {1: 20, 2: 40}
-        score = score_mapping.get(strong_themes_count, 60)
-
-        return {
-            "passed": True,
-            "score": score,
-            "reason": f"{strong_themes_count} Strong Theme(s)"
         }
 
     # --------------------------------------------------
