@@ -48,7 +48,7 @@ class NewsEvidenceBuilder:
         # Evidence
         # --------------------------------------------------
         return Evidence(
-            provider="NEWS",
+            provider="MARKET_STORY",
             recommendation=recommendation,
             score=score,
             confidence=max(
@@ -65,7 +65,15 @@ class NewsEvidenceBuilder:
                     story.priority
                 )
             ),
-            reason=reason
+            reason=reason,
+            facts={
+                "story_name": story.name,
+                "story_strength": story.story_strength,
+                "story_direction": story.story_direction,
+                "evidence_count": story.evidence_count,
+                "contradiction_count": story.contradiction_count,
+                "lifecycle": story.lifecycle
+            }
         )
 
     # --------------------------------------------------

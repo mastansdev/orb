@@ -69,6 +69,8 @@ class MarketStoryBuilder:
             industry=classified_news.industry,
             theme=classified_news.theme,
             confidence=classified_news.confidence,
+            story_strength=classified_news.confidence,
+            story_direction="STRENGTHENING",
             priority=classified_news.priority,
             lifecycle="NEW",
             expected_duration="UNKNOWN",
@@ -78,6 +80,14 @@ class MarketStoryBuilder:
             affected_symbols=list(
                 classified_news.affected_symbols
             ),
+            leading_symbols=list(
+                classified_news.affected_symbols
+            ),
+
+            evidence_count=1,
+
+            contradiction_count=0,
+
             created_at=datetime.now(),
             updated_at=datetime.now()
         )
@@ -101,14 +111,31 @@ class MarketStoryBuilder:
             story.supporting_news.append(
                 classified_news.news_id
             )
+        story.evidence_count = len(
+            story.supporting_news
+        )    
+
+        # --------------------------------------------------
+        # Merge affected symbols
+        # --------------------------------------------------
+        for symbol in classified_news.affected_symbols:
+            if symbol not in story.affected_symbols:
+                story.affected_symbols.append(symbol)
+        
+        story.leading_symbols = list(
+            story.affected_symbols
+        )
 
         # --------------------------------------------------
         # Confidence Growth
         # --------------------------------------------------
+        news_confidence = classified_news.confidence or 0
         story.confidence = min(
             100,
-            story.confidence + 5
+            max(story.confidence, news_confidence) + 2
         )
+
+        story.story_strength = story.confidence
 
         # --------------------------------------------------
         # Lifecycle
@@ -128,6 +155,7 @@ class MarketStoryBuilder:
         # --------------------------------------------------
         # Update Timestamp
         # --------------------------------------------------
+        story.story_direction = "STRENGTHENING"
         story.updated_at = datetime.now()
         return story
 

@@ -1,3 +1,21 @@
+from dataclasses import dataclass
+from typing import Optional
+
+# ==========================================================
+# Portfolio Decision
+# ==========================================================
+
+@dataclass
+class PortfolioDecision:
+
+    action: str
+
+    allowed: bool
+
+    reason: str
+
+    replacement_candidate: Optional[object] = None
+
 class PortfolioRiskManager:
     """
     Portfolio-level admission controller.
@@ -21,7 +39,7 @@ class PortfolioRiskManager:
         max_open_trades=100
     ):
         self.max_open_trades = max_open_trades
-        self.open_trades = set()
+        self.open_trades = {}
 
     # --------------------------------------------------
     # Portfolio State
@@ -29,15 +47,46 @@ class PortfolioRiskManager:
 
     def add_trade(
         self,
-        symbol
+        opportunity
     ):
-        self.open_trades.add(symbol)
+        """
+        Register one active portfolio opportunity.
+        """
+        self.open_trades[
+            opportunity.symbol
+        ] = opportunity
 
     def remove_trade(
         self,
         symbol
     ):
-        self.open_trades.discard(symbol)
+        """
+        Remove one active portfolio opportunity.
+        """
+        self.open_trades.pop(
+            symbol,
+            None
+        )
+
+    # --------------------------------------------------
+    # Weakest Portfolio Opportunity
+    # --------------------------------------------------
+
+    def _weakest_opportunity(self):
+        """
+        Return the weakest currently
+        held portfolio opportunity.
+        """
+        if not self.open_trades:
+            return None
+
+        return min(
+            self.open_trades.values(),
+            key=lambda opportunity: (
+                opportunity.conviction,
+                opportunity.quality
+            )
+        )
 
     # --------------------------------------------------
     # Admission Check
@@ -45,38 +94,48 @@ class PortfolioRiskManager:
 
     def can_take_trade(
         self,
-        symbol,
-        intelligence=None
+        opportunity
     ):
         # ---------------------------------
         # Maximum Open Trades
         # ---------------------------------
-
         if len(self.open_trades) >= self.max_open_trades:
 
-            return {
-                "allowed": False,
-                "reason": (
-                    f"Maximum Open Trades "
-                    f"Reached ({self.max_open_trades})"
-                )
-            }
+            weakest = self._weakest_opportunity()
 
+            return PortfolioDecision(
+
+                action="PORTFOLIO_FULL",
+
+                allowed=False,
+
+                reason=(
+                    f"Portfolio Full ({self.max_open_trades})"
+                ),
+               
+                replacement_candidate=weakest
+            )
+            
         # ---------------------------------
         # Duplicate Trade Protection
         # ---------------------------------
+        if opportunity.symbol in self.open_trades:
 
-        if symbol in self.open_trades:
-
-            return {
-                "allowed": False,
-                "reason": (
-                    f"{symbol} already exists "
+            return PortfolioDecision(
+                action="DUPLICATE",
+                allowed=False,
+                reason=(
+                    f"{opportunity.symbol} already exists "
                     "in portfolio"
                 )
-            }
+            )
 
-        return {
-            "allowed": True,
-            "reason": "Approved"
-        }
+        return PortfolioDecision(
+
+            action="APPROVED",
+                
+            allowed=True,
+
+            reason="Portfolio admission approved."
+        )
+       

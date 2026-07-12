@@ -29,7 +29,7 @@ Author : H&M ORB AUTO TRADER
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import List
+from typing import List, Optional
 
 from evidence import Evidence
 
@@ -166,48 +166,6 @@ class CapitalAllocation:
 
 
 # ==========================================================
-# Opportunity Model
-# ==========================================================
-
-@dataclass
-class Opportunity:
-
-    symbol: str
-
-    quality: float = 0.0
-
-    conviction: float = 0.0
-
-    health: str = "NEW"
-
-    previous_quality: float = 0.0
-
-    confidence: float = 0.0
-
-    capital_allocation: CapitalAllocation = field(
-        default_factory=CapitalAllocation
-    )
-
-    entry_mode: str = "NORMAL"
-
-    target_mode: str = "NORMAL"
-
-    exit_mode: str = "NORMAL"
-
-    rank: int = 999
-
-    reasons: List[str] = field(default_factory=list)
-
-    warnings: List[str] = field(default_factory=list)
-
-    lifecycle: OpportunityLifecycle = field(
-        default_factory=OpportunityLifecycle
-    )
-
-    last_updated: datetime = field(default_factory=datetime.now)
-
-
-# ==========================================================
 # Opportunity Intelligence
 # ==========================================================
 
@@ -227,6 +185,16 @@ class OpportunityIntelligence:
     catalyst_type: str = ""
 
     catalyst_confidence: float = 0.0
+    
+    story_strength: float = 0.0
+    
+    story_direction: str = ""
+    
+    story_evidence_count: int = 0
+    
+    story_contradictions: int = 0
+    
+    story_lifecycle: str = ""
 
     # Market Structure
     dominant_sector: str = ""
@@ -267,6 +235,65 @@ class OpportunityIntelligence:
     reasons: List[str] = field(default_factory=list)
 
     warnings: List[str] = field(default_factory=list)
+
+
+# ==========================================================
+# Opportunity Model
+# ==========================================================
+
+@dataclass
+class Opportunity:
+
+    symbol: str
+
+    first_seen: datetime = field(
+        default_factory=datetime.now
+    )
+
+    intelligence: Optional[OpportunityIntelligence] = None
+
+    quality: float = 0.0
+
+    conviction: float = 0.0
+
+    health: str = "NEW"
+
+    previous_quality: float = 0.0
+
+    confidence: float = 0.0
+
+    capital_allocation: CapitalAllocation = field(
+        default_factory=CapitalAllocation
+    )
+
+    entry_mode: str = "NORMAL"
+
+    target_mode: str = "NORMAL"
+
+    exit_mode: str = "NORMAL"
+
+    rank: int = 999
+
+    portfolio_percentile: float = 0.0
+    conviction_gap_to_best: float = 0.0
+    quality_gap_to_best: float = 0.0
+    challenge_score: float = 0.0
+
+    replacement_candidate: Optional[str] = None
+    replacement_reason: str = ""
+    replacement_score: float = 0.0
+
+    reasons: List[str] = field(default_factory=list)
+
+    warnings: List[str] = field(default_factory=list)
+
+    lifecycle: OpportunityLifecycle = field(
+        default_factory=OpportunityLifecycle
+    )
+
+    last_updated: datetime = field(default_factory=datetime.now)
+
+    decision: DecisionAction = DecisionAction.WAIT
 
 
 # ==========================================================
@@ -405,7 +432,7 @@ class Brain:
 
         """
         Rank every known opportunity from highest quality
-        to lowest quality.
+        to lowest quality using structural tie-breakers.
         """
 
         ranked = sorted(
@@ -436,14 +463,207 @@ class Brain:
 
     # --------------------------------------------------
 
+    def _compare_opportunities(
+        self,
+        opportunity: Opportunity
+    ):
+        """
+        Compare one opportunity against all other known opportunities.
+        """
+        record = self.opportunities.get(
+            opportunity.symbol
+        )
+        
+        if record is None:
+            return {
+                "rank": None,
+                "top_opportunity": False,
+                "better_opportunities": [],
+                "better_count": 0,
+                "total_opportunities": len(self.rankings),
+                "portfolio_percentile": 0.0,
+                "conviction_gap_to_best": 0.0,
+                "quality_gap_to_best": 0.0
+            }
+            
+        better = [
+            other.symbol
+            for other in self.rankings
+            if (
+                other.rank < record.rank
+                and other.symbol != record.symbol
+            )
+        ]
+        
+        # --------------------------------------------------
+        # Relative Portfolio Metrics
+        # --------------------------------------------------
+        if not self.rankings:
+            return {
+                "rank": record.rank,
+                "top_opportunity": False,
+                "better_opportunities": [],
+                "better_count": 0,
+                "total_opportunities": 0,
+                "portfolio_percentile": 0.0,
+                "conviction_gap_to_best": 0.0,
+                "quality_gap_to_best": 0.0
+            }
+
+        best = self.rankings[0]
+
+        total = max(
+            len(self.rankings),
+            1
+        )
+        
+        portfolio_percentile = (
+            (total - record.rank + 1) / total
+        ) * 100
+        
+        conviction_gap = (
+            best.conviction - record.conviction
+        )
+        
+        quality_gap = (
+            best.quality - record.quality
+        )
+        
+        # --------------------------------------------------
+        # Store Relative Portfolio Metrics
+        # --------------------------------------------------
+        record.portfolio_percentile = portfolio_percentile
+        record.conviction_gap_to_best = conviction_gap
+        record.quality_gap_to_best = quality_gap
+        
+        return {
+            "rank": record.rank,
+            "top_opportunity": (
+                record.rank <= 5
+            ),
+            "better_opportunities": better,
+            "better_count": len(better),
+            "total_opportunities": total,
+            "portfolio_percentile": portfolio_percentile,
+            "conviction_gap_to_best": conviction_gap,
+            "quality_gap_to_best": quality_gap
+        }
+
+    # --------------------------------------------------
+
+    def _apply_portfolio_context(
+        self,
+        opportunity: Opportunity,
+        comparison: dict
+    ):
+        """
+        Adjust opportunity conviction
+        using portfolio context.
+        """
+        # --------------------------------------------------
+        # Portfolio Rank Pressure
+        # --------------------------------------------------
+        if not comparison["top_opportunity"]:
+
+            opportunity.conviction -= 2
+
+            opportunity.reasons.append(
+                "Outside Top-5 portfolio opportunities."
+            )
+
+        # --------------------------------------------------
+        # Elite Opportunity Bonus
+        # --------------------------------------------------
+        elif comparison["portfolio_percentile"] >= 90:
+
+            opportunity.conviction += 1
+
+            opportunity.reasons.append(
+                "Elite portfolio opportunity."
+            )
+
+        # --------------------------------------------------
+        # Clamp Values safely
+        # --------------------------------------------------
+        opportunity.conviction = max(
+            0,
+            min(
+                100,
+                opportunity.conviction
+            )
+        )
+
+    # --------------------------------------------------
+
+    def _find_replacement_candidate(
+        self,
+        opportunity: Opportunity
+    ):
+        """
+        Determine whether this opportunity
+        should replace an existing one.
+        """
+        # --------------------------------------------------
+        # No opportunities to compare
+        # --------------------------------------------------
+        if not self.rankings:
+
+            return None
+
+        # --------------------------------------------------
+        # Lowest ranked opportunity
+        # --------------------------------------------------
+        weakest = self.rankings[-1]
+
+        # --------------------------------------------------
+        # Never replace itself
+        # --------------------------------------------------
+        if weakest.symbol == opportunity.symbol:
+
+            return None
+
+        # --------------------------------------------------
+        # Replacement Threshold
+        # --------------------------------------------------
+        conviction_edge = (
+            opportunity.conviction - weakest.conviction
+        )
+        quality_edge = (
+            opportunity.quality - weakest.quality
+        )
+
+        if (
+            conviction_edge >= 5
+            and quality_edge >= 5
+        ):
+
+            opportunity.replacement_candidate = weakest.symbol
+
+            opportunity.replacement_reason = (
+                "Higher conviction and opportunity quality."
+            )
+
+            opportunity.replacement_score = (
+                conviction_edge + quality_edge
+            )
+
+            return weakest
+
+        opportunity.replacement_candidate = None
+        opportunity.replacement_reason = ""
+        opportunity.replacement_score = 0
+        return None
+
+    # --------------------------------------------------
+
     def _build_market_story(
         self,
         intelligence_list: List[OpportunityIntelligence]
     ):
 
         """
-        Build today's dominant market story from all
-        available market intelligence.
+        Build today's dominant market story by aggregating across 
+        all available market intelligence profiles.
         """
 
         if not intelligence_list:
@@ -471,7 +691,7 @@ class Brain:
 
             if intelligence.dominant_theme:
 
-                theme = intelligence.dominant_theme
+                theme = intelligence.dominant_theme anchor
 
                 theme_strength.setdefault(
                     theme,
@@ -576,6 +796,8 @@ class Brain:
 
             reason = snapshot.get("reason", "")
 
+            facts = snapshot.get("facts", {})
+
             intelligence.reasons.append(reason)
 
             # ----------------------------
@@ -585,6 +807,7 @@ class Brain:
             if provider == "SECTOR":
 
                 intelligence.sector_strength = score
+                intelligence.dominant_sector = facts.get("sector_name", "UNKNOWN")
 
             # ----------------------------
             # Industry
@@ -593,6 +816,7 @@ class Brain:
             elif provider == "INDUSTRY":
 
                 intelligence.industry_strength = score
+                intelligence.dominant_industry = facts.get("industry_name", "UNKNOWN")
 
             # ----------------------------
             # Theme
@@ -601,6 +825,7 @@ class Brain:
             elif provider == "THEME":
 
                 intelligence.theme_strength = score
+                intelligence.dominant_theme = facts.get("theme_name", "UNKNOWN")
 
             # ----------------------------
             # News
@@ -609,6 +834,49 @@ class Brain:
             elif provider == "NEWS":
 
                 intelligence.news_strength = score
+                intelligence.dominant_catalyst = facts.get("catalyst", "")
+                intelligence.catalyst_type = facts.get("catalyst_type", "")
+                intelligence.catalyst_confidence = facts.get("catalyst_confidence", 0.0)
+
+            # ----------------------------
+            # Market Story
+            # ----------------------------
+            elif provider == "MARKET_STORY":
+
+                intelligence.story_strength = facts.get(
+                    "story_strength",
+                    score
+                )
+
+                intelligence.story_direction = facts.get(
+                    "story_direction",
+                    ""
+                )
+
+                intelligence.story_evidence_count = facts.get(
+                    "evidence_count",
+                    0
+                )
+
+                intelligence.story_contradictions = facts.get(
+                    "contradiction_count",
+                    0
+                )
+
+                intelligence.story_lifecycle = facts.get(
+                    "lifecycle",
+                    ""
+                )
+
+                intelligence.story_name = facts.get(
+                    "story_name",
+                    ""
+                )
+                
+                if "dominant_catalyst" in facts:
+                    intelligence.dominant_catalyst = facts.get("dominant_catalyst", "")
+                    intelligence.catalyst_type = facts.get("catalyst_type", "")
+                    intelligence.catalyst_confidence = facts.get("catalyst_confidence", 0.0)
 
             # ----------------------------
             # Results
@@ -693,6 +961,25 @@ class Brain:
         if intelligence.news_strength >= 80:
             conviction += 5
 
+        # --------------------------------------------------
+        # Story Reinforcements
+        # --------------------------------------------------
+        if intelligence.story_strength >= 80:
+            conviction += 6
+
+        if intelligence.story_direction == "STRENGTHENING":
+            conviction += 4
+
+        if intelligence.story_lifecycle == "DOMINANT":
+            conviction += 5
+        elif intelligence.story_lifecycle == "STRONG":
+            conviction += 3
+
+        if intelligence.story_evidence_count >= 10:
+            conviction += 5
+        elif intelligence.story_evidence_count >= 5:
+            conviction += 3
+
         if intelligence.government_strength >= 80:
             conviction += 6
 
@@ -710,6 +997,20 @@ class Brain:
         # --------------------------------------------------
 
         conviction -= intelligence.negative_strength
+
+        # --------------------------------------------------
+        # Story Penalties
+        # --------------------------------------------------
+        if intelligence.story_contradictions > 0:
+            conviction -= (
+                intelligence.story_contradictions * 3
+            )
+
+        if intelligence.story_direction == "WEAKENING":
+            conviction -= 5
+
+        if intelligence.story_direction == "CONTRADICTED":
+            conviction -= 10
 
         # --------------------------------------------------
 
@@ -779,7 +1080,7 @@ class Brain:
     ):
 
         """
-        Build one complete opportunity.
+        Build one complete opportunity lifecycle profile.
         """
 
         intelligence = self._build_opportunity_intelligence(
@@ -814,7 +1115,6 @@ class Brain:
 
         opportunity.conviction = conviction
 
-        # Track evidence analytical trace history components inside opportunity 
         opportunity.reasons = [
             f"{e.provider.upper()}: {e.snapshot().get('reason', '')}" 
             for e in evidence_list
@@ -824,7 +1124,6 @@ class Brain:
         total_confidence = sum(e.snapshot().get("confidence", 0) for e in evidence_list)
         opportunity.confidence = total_confidence / len(evidence_list) if evidence_list else 0
 
-        # Conflict Detection Routing Trace
         bullish = sum(1 for e in evidence_list if e.snapshot().get("recommendation") == "BUY")
         bearish = sum(1 for e in evidence_list if e.snapshot().get("recommendation") == "SELL")
         if bullish > 0 and bearish > 0:
@@ -924,7 +1223,6 @@ class Brain:
 
             action = DecisionAction.BUY
 
-        # Institutional Gating Safety Systems
         if opportunity.confidence < self.minimum_confidence:
             warnings.append(f"Confidence below minimum ({opportunity.confidence:.2f}).")
             action = DecisionAction.WAIT
@@ -1100,6 +1398,40 @@ class Brain:
 
     # --------------------------------------------------
 
+    def _update_opportunity(
+        self,
+        symbol,
+        intelligence,
+        quality,
+        conviction,
+        decision,
+        opportunity_reasons=None,
+        opportunity_warnings=None
+    ):
+        """
+        Update specialized global tracking fields and timestamps 
+        for an existing stored opportunity.
+        """
+        opportunity = self.opportunities.get(symbol)
+
+        if opportunity is None:
+            opportunity = Opportunity(symbol=symbol)
+            self.opportunities[symbol] = opportunity
+
+        opportunity.intelligence = intelligence
+        opportunity.quality = quality
+        opportunity.conviction = conviction
+        opportunity.decision = decision.action
+        
+        if opportunity_reasons is not None:
+            opportunity.reasons = list(opportunity_reasons)
+        if opportunity_warnings is not None:
+            opportunity.warnings = list(opportunity_warnings)
+            
+        opportunity.last_updated = datetime.now()
+
+    # --------------------------------------------------
+
     def evaluate(
         self,
         symbol: str,
@@ -1133,13 +1465,10 @@ class Brain:
         # --------------------------------------------------
         if conviction_snapshot is not None:
 
-            # Store the latest evidence readiness snapshot.
-            # This is informational for now and will be used
-            # by future Brain intelligence layers.
             self.latest_conviction_snapshot = conviction_snapshot
 
         # --------------------------------------------------
-        # Evaluate Opportunity
+        # Evaluate & Store Opportunity
         # --------------------------------------------------
 
         opportunity = self._evaluate_opportunity(
@@ -1150,20 +1479,24 @@ class Brain:
 
         )
 
-        # --------------------------------------------------
-        # Store latest opportunity
-        # --------------------------------------------------
-
         self.opportunities[symbol] = opportunity
 
         # --------------------------------------------------
-        # Rank all opportunities
+        # Rank All Opportunities Across the Registry
         # --------------------------------------------------
 
         self._rank_opportunities()
 
         # --------------------------------------------------
-        # Build Market Story
+        # Contextual Peer Comparison
+        # --------------------------------------------------
+
+        comparison = self._compare_opportunities(
+            opportunity
+        )
+
+        # --------------------------------------------------
+        # Extract Intelligence Snapshot
         # --------------------------------------------------
 
         intelligence = self._build_opportunity_intelligence(
@@ -1174,10 +1507,30 @@ class Brain:
 
         )
 
-        self._build_market_story(
+        # --------------------------------------------------
+        # Build Market-Wide Macro Narrative Story
+        # --------------------------------------------------
 
-            [intelligence]
+        all_intelligence = [
+            op.intelligence for op in self.opportunities.values() 
+            if op.intelligence is not None
+        ]
+        
+        self._build_market_story(all_intelligence)
 
+        # --------------------------------------------------
+        # Apply Portfolio Context
+        # --------------------------------------------------
+        self._apply_portfolio_context(
+            opportunity,
+            comparison
+        )
+
+        # --------------------------------------------------
+        # Apply Dynamic Replacement Engine Evaluation
+        # --------------------------------------------------
+        self._find_replacement_candidate(
+            opportunity
         )
 
         # --------------------------------------------------
@@ -1190,6 +1543,20 @@ class Brain:
 
             evidence_list
 
+        )
+
+        # --------------------------------------------------
+        # Synchronize Brain Memory State Fields
+        # --------------------------------------------------
+
+        self._update_opportunity(
+            symbol=symbol,
+            intelligence=intelligence,
+            quality=opportunity.quality,
+            conviction=opportunity.conviction,
+            decision=decision,
+            opportunity_reasons=opportunity.reasons,
+            opportunity_warnings=opportunity.warnings
         )
 
         # --------------------------------------------------
