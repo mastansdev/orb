@@ -35,14 +35,9 @@ class PositionManager:
             capital_qty,
             max_trade_qty)
 
-        if qty < MIN_QTY:
-            return 0
-
-        if qty * entry_price < MIN_TRADE_VALUE:
-            return 0
-
         return qty
-
+        
+        
     # --------------------------------------------------
 
     def has_position(self, security_id):

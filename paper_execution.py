@@ -11,6 +11,12 @@ class PaperExecution:
         print(f"Quantity    : {qty}")
         print("===================================\n")
 
+        return {
+        "success": True,
+        "order_id": f"PAPER_{symbol}",
+        "message": "Paper order executed successfully."
+    }
+
     def sell(self, security_id, symbol, price, qty):
 
         print("\n===================================")
@@ -21,3 +27,9 @@ class PaperExecution:
         print(f"Exit Price  : {price}")
         print(f"Quantity    : {qty}")
         print("===================================\n")
+
+        return {
+        "success": True,
+        "order_id": f"PAPER_{symbol}",
+        "message": "Paper order executed successfully."
+    }

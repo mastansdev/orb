@@ -32,7 +32,11 @@ from enum import Enum
 from typing import List, Optional
 
 from evidence import Evidence
-
+from repositories.intelligence_repository import IntelligenceRepository
+from news_evidence_builder import NewsEvidenceBuilder
+from impact_engine import (
+    ImpactEngine,
+)
 
 # ==========================================================
 # Decision Actions
@@ -75,6 +79,8 @@ class Decision:
     evidence_used: int = 0
 
     timestamp: datetime = field(default_factory=datetime.now)
+
+    opportunity: "Opportunity" = None
 
     def explain(self):
 
@@ -378,229 +384,100 @@ class Brain:
 
         self.market_story = MarketStory()
 
+        self.intelligence_repository = IntelligenceRepository()
+
+        self.pending_stories = []
+
+        self.news_evidence_builder = NewsEvidenceBuilder()
+
+        self.impact_engine = ImpactEngine()
+
         self.minimum_confidence = 60
 
         self.minimum_score = 60
 
     # --------------------------------------------------
 
-    def _identify_market_story(
-            self,
-            intelligence: OpportunityIntelligence
-    ):
-        
-            """
-            Determine WHY this opportunity exists.
+    # --------------------------------------------------
 
-            Responsibility
-            --------------
-            This function interprets market evidence and identifies
-            the dominant reason behind the opportunity.
+    def update_intelligence(self):
+         """
+         Load newly accumulated institutional intelligence.
+         This is the only entry point through which the Brain
+         consumes Railway intelligence.
+         """
 
-            It DOES NOT:
-
-                - calculate quality
-                - calculate conviction
-                - allocate capital
-                - make trading decisions
-
-            It ONLY answers:
-
-
-                "What story is the market telling?"
-            """
-
-            story = {
-                "primary_cause": "UNKNOWN",
-                "primary_driver": None,
-                "flow_target": None,
-                "flow_direction": "UNKNOWN",
-                "flow_breadth": "UNKNOWN",
-                "market_leaders": [],
-                "supporting": [],
-                "contradicting": []
-            }
-
-            # --------------------------------------------------
-            # Collect available evidence
-            # --------------------------------------------------
-            evidence = {
-                "SECTOR": intelligence.sector_strength,
-                "INDUSTRY": intelligence.industry_strength,
-                "THEME": intelligence.theme_strength,
-                "NEWS": intelligence.news_strength,
-                "RESULTS": intelligence.results_strength,
-                "GOVERNMENT": intelligence.government_strength,
-                "VOLUME": intelligence.volume_strength,
-                "RELATIVE_STRENGTH": intelligence.relative_strength,
-                "MARKET": intelligence.market_strength
-            }
-
-            # --------------------------------------------------
-            # Rank evidence by strength
-            # --------------------------------------------------
-            ranked_evidence = sorted(
-                evidence.items(),
-                key=lambda item: item[1],
-                reverse=True
-            )
-
-            # --------------------------------------------------
-            # Classify evidence
-            # --------------------------------------------------
-            cause_evidence = {
-                "NEWS": intelligence.news_strength,
-                "RESULTS": intelligence.results_strength,
-                "GOVERNMENT": intelligence.government_strength
-            }
-            flow_evidence = {
-                "SECTOR": intelligence.sector_strength,
-                "INDUSTRY": intelligence.industry_strength,
-                "THEME": intelligence.theme_strength
-            }
-            confirmation_evidence = {
-                "RELATIVE_STRENGTH": intelligence.relative_strength,
-                "VOLUME": intelligence.volume_strength,
-                "MARKET": intelligence.market_strength
-            }
-
-            story = self._reason_about_market_story(
-                story=story,
-                ranked_evidence=ranked_evidence,
-                cause_evidence=cause_evidence,
-                flow_evidence=flow_evidence,
-                confirmation_evidence=confirmation_evidence
-            )
-
-            return story
+         self.pending_stories = (
+             self.intelligence_repository.load_new_intelligence()
+        )
+         
+         return self.pending_stories
+    
+    # --------------------------------------------------
 
     # --------------------------------------------------
 
-    def _reason_about_market_story(
-            self,
-            story,
-            ranked_evidence,
-            cause_evidence,
-            flow_evidence,
-            confirmation_evidence
-    ):
+    def build_news_evidence(self):
         """
-        Determine the dominant market story from the prepared evidence.
-        
+        Convert newly received institutional impacts
+        into Brain Evidence.
+        Railway no longer owns this responsibility.
         """
-        
-        active_causes = {
-            name: strength
-            for name, strength in cause_evidence.items()
-            if strength > 0
-        }
 
-        if not active_causes:
-            return story
-        
-        # --------------------------------------------------
-        # Generate possible market hypotheses
-        # --------------------------------------------------
+        evidence_list = []
 
-        hypotheses = []
+        for story in self.pending_stories:
+            impact = self.impact_engine.evaluate(
+                story
+            )
 
-        # Company-specific possibility
-        if (
-            cause_evidence["RESULTS"] > 0
-            or cause_evidence["NEWS"] > 0
-        ):
-            hypotheses.append("COMPANY_SPECIFIC")
+            evidence = self.news_evidence_builder.build(
+                story,
+                impact
+            )
 
-        # Government-driven possibility
-        if cause_evidence["GOVERNMENT"] > 0:
-            hypotheses.append("GOVERNMENT_DRIVEN")
-
-        if not hypotheses:
-            return story
-
-        for hypothesis in hypotheses:
-            hypothesis_valid = True
-            story["primary_cause"] = hypothesis
-
-        # --------------------------------------------------
-        # Validate COMPANY_SPECIFIC hypothesis
-        # --------------------------------------------------
-
-        if story["primary_cause"] == "COMPANY_SPECIFIC":
-             
-             if (
-                 flow_evidence["SECTOR"] == 0
-                 and flow_evidence["INDUSTRY"] == 0
-                 and flow_evidence["THEME"] == 0
-            ):
-                story["supporting"].append(
-                     "Peers are not participating"
-                )
-
-             else:
+            evidence_list.append(
+                evidence
+            )
             
-                story["contradicting"].append (
-                    "Sector / Industry participation detected"
-                )
+        return evidence_list
+        
+        
 
-                hypothesis_valid = False
-
-
-        return story
-  
+    # --------------------------------------------------
+     
     # --------------------------------------------------
 
-    def _observe_market_behaviour(
+    
+    def _calculate_opportunity_quality(
             self,
             intelligence: OpportunityIntelligence
     ):
         """
-        Observe how the market is behaving.
+        Convert available market intelligence into one
+        Opportunity Quality.
+        Only evidence that actually exists participates
+        in the calculation.
+        """
+
+        evidence = []
         
-        This function DOES NOT decide anything.
+        
+        def add(value):
+            if value is not None and value > 0:
+                evidence.append(value)
 
-        It only reports what it sees.
-        """
-
-        observation = {
-            "behaviour": "UNKNOWN",
-            "leaders": [],
-            "followers": [],
-            "laggards": [],
-            "capital_flow": "UNKNOWN",
-            "confidence": 0.0,
-            "notes": []
-        }
-
-        return observation
-
-    # --------------------------------------------------
-
-    def _calculate_opportunity_quality(
-        self,
-        intelligence: OpportunityIntelligence
-    ):
-
-        """
-        Convert market intelligence into one Opportunity Quality.
-        Returns a value between 0 and 100.
-        """
-
-        positive = [
-
-            intelligence.sector_strength,
-            intelligence.industry_strength,
-            intelligence.theme_strength,
-            intelligence.news_strength,
-            intelligence.results_strength,
-            intelligence.government_strength,
-            intelligence.volume_strength,
-            intelligence.relative_strength,
-            intelligence.market_strength,
-            intelligence.market_mood,
-            intelligence.continuation_probability
-
-        ]
+        add(intelligence.sector_strength)
+        add(intelligence.industry_strength)
+        add(intelligence.theme_strength)
+        add(intelligence.news_strength)
+        add(intelligence.results_strength)
+        add(intelligence.government_strength)
+        add(intelligence.volume_strength)
+        add(intelligence.relative_strength)
+        add(intelligence.market_strength)
+        add(intelligence.market_mood)
+        add(intelligence.continuation_probability)
 
         print("\n========== QUALITY INPUTS ==========")
         print(f"Sector               : {intelligence.sector_strength}")
@@ -616,251 +493,22 @@ class Brain:
         print(f"Continuation         : {intelligence.continuation_probability}")
         print("====================================\n")
 
-        quality = sum(positive) / len(positive)
+        if not evidence:
+            return 0.0
 
-        # Negative events reduce quality
+        quality = sum(evidence) / len(evidence)
+
         quality -= intelligence.negative_strength
 
-        # Clamp between 0 and 100
-        quality = max(
-            0,
-            min(
-                100,
-                quality
-            )
-        )
+        quality = max(0.0, min(100.0, quality))
 
         return quality
 
-    # --------------------------------------------------
-
-    def _rank_opportunities(self):
-
-        """
-        Rank every known opportunity from highest quality
-        to lowest quality using structural tie-breakers.
-        """
-
-        ranked = sorted(
-
-            self.opportunities.values(),
-
-            key=lambda x: (
-
-                x.quality,
-
-                x.confidence,
-
-                x.conviction
-
-            ),
-
-            reverse=True
-
-        )
-
-        for rank, opportunity in enumerate(ranked, start=1):
-
-            opportunity.rank = rank
-
-        self.rankings = ranked
-
-        return ranked
+    
 
     # --------------------------------------------------
 
-    def _compare_opportunities(
-        self,
-        opportunity: Opportunity
-    ):
-        """
-        Compare one opportunity against all other known opportunities.
-        """
-        record = self.opportunities.get(
-            opportunity.symbol
-        )
-        
-        if record is None:
-            return {
-                "rank": None,
-                "top_opportunity": False,
-                "better_opportunities": [],
-                "better_count": 0,
-                "total_opportunities": len(self.rankings),
-                "portfolio_percentile": 0.0,
-                "conviction_gap_to_best": 0.0,
-                "quality_gap_to_best": 0.0
-            }
-            
-        better = [
-            other.symbol
-            for other in self.rankings
-            if (
-                other.rank < record.rank
-                and other.symbol != record.symbol
-            )
-        ]
-        
-        # --------------------------------------------------
-        # Relative Portfolio Metrics
-        # --------------------------------------------------
-        if not self.rankings:
-            return {
-                "rank": record.rank,
-                "top_opportunity": False,
-                "better_opportunities": [],
-                "better_count": 0,
-                "total_opportunities": 0,
-                "portfolio_percentile": 0.0,
-                "conviction_gap_to_best": 0.0,
-                "quality_gap_to_best": 0.0
-            }
-
-        best = self.rankings[0]
-
-        total = max(
-            len(self.rankings),
-            1
-        )
-        
-        portfolio_percentile = (
-            (total - record.rank + 1) / total
-        ) * 100
-        
-        conviction_gap = (
-            best.conviction - record.conviction
-        )
-        
-        quality_gap = (
-            best.quality - record.quality
-        )
-        
-        # --------------------------------------------------
-        # Store Relative Portfolio Metrics
-        # --------------------------------------------------
-        record.portfolio_percentile = portfolio_percentile
-        record.conviction_gap_to_best = conviction_gap
-        record.quality_gap_to_best = quality_gap
-        
-        return {
-            "rank": record.rank,
-            "top_opportunity": (
-                record.rank <= 5
-            ),
-            "better_opportunities": better,
-            "better_count": len(better),
-            "total_opportunities": total,
-            "portfolio_percentile": portfolio_percentile,
-            "conviction_gap_to_best": conviction_gap,
-            "quality_gap_to_best": quality_gap
-        }
-
-    # --------------------------------------------------
-
-    def _apply_portfolio_context(
-        self,
-        opportunity: Opportunity,
-        comparison: dict
-    ):
-        """
-        Adjust opportunity conviction
-        using portfolio context.
-        """
-        # --------------------------------------------------
-        # Portfolio Rank Pressure
-        # --------------------------------------------------
-        if not comparison["top_opportunity"]:
-
-            opportunity.conviction -= 2
-
-            opportunity.reasons.append(
-                "Outside Top-5 portfolio opportunities."
-            )
-
-        # --------------------------------------------------
-        # Elite Opportunity Bonus
-        # --------------------------------------------------
-        elif comparison["portfolio_percentile"] >= 90:
-
-            opportunity.conviction += 1
-
-            opportunity.reasons.append(
-                "Elite portfolio opportunity."
-            )
-
-        # --------------------------------------------------
-        # Clamp Values safely
-        # --------------------------------------------------
-        opportunity.conviction = max(
-            0,
-            min(
-                100,
-                opportunity.conviction
-            )
-        )
-
-    # --------------------------------------------------
-
-    def _find_replacement_candidate(
-        self,
-        opportunity: Opportunity
-    ):
-        """
-        Determine whether this opportunity
-        should replace an existing one.
-        """
-        # --------------------------------------------------
-        # No opportunities to compare
-        # --------------------------------------------------
-        if not self.rankings:
-
-            return None
-
-        # --------------------------------------------------
-        # Lowest ranked opportunity
-        # --------------------------------------------------
-        weakest = self.rankings[-1]
-
-        # --------------------------------------------------
-        # Never replace itself
-        # --------------------------------------------------
-        if weakest.symbol == opportunity.symbol:
-
-            return None
-
-        # --------------------------------------------------
-        # Replacement Threshold
-        # --------------------------------------------------
-        conviction_edge = (
-            opportunity.conviction - weakest.conviction
-        )
-        quality_edge = (
-            opportunity.quality - weakest.quality
-        )
-
-        if (
-            conviction_edge >= 5
-            and quality_edge >= 5
-        ):
-
-            opportunity.replacement_candidate = weakest.symbol
-
-            opportunity.replacement_reason = (
-                "Higher conviction and opportunity quality."
-            )
-
-            opportunity.replacement_score = (
-                conviction_edge + quality_edge
-            )
-
-            return weakest
-
-        opportunity.replacement_candidate = None
-        opportunity.replacement_reason = ""
-        opportunity.replacement_score = 0
-        return None
-
-    # --------------------------------------------------
+    
 
     def _build_market_story(
         self,
@@ -1338,33 +986,19 @@ class Brain:
                 opportunity.warnings.append("High evidence conflict.")
                 opportunity.confidence *= 0.80
 
-        allocation = self._calculate_capital_allocation(
+       # --------------------------------------------------
+       # Capital Allocation
+       # --------------------------------------------------
+       # PortfolioRiskManager determines capital allocation.
 
-            opportunity,
+        opportunity.capital_allocation = None
 
-            conviction
+        # ExecutionStrategySelector determines entry mode.
+        opportunity.entry_mode = None
 
-        )
-
-        opportunity.capital_allocation = allocation
-
-        opportunity.entry_mode = self._determine_entry_mode(
-
-            intelligence,
-
-            conviction,
-
-            allocation
-
-        )
-
-        opportunity.target_mode = self._determine_target_mode(
-
-            conviction,
-
-            opportunity.lifecycle
-
-        )
+        # PositionManager / ExecutionStrategySelector
+        # determine target management.
+        opportunity.target_mode = None
 
         self._update_opportunity_health(
 
@@ -1423,19 +1057,24 @@ class Brain:
             f"Target Mode = {opportunity.target_mode}"
         )
 
-        action = DecisionAction.WAIT
+        # --------------------------------------------------
+        # Brain Decision
+        # --------------------------------------------------
 
-        if opportunity.capital_allocation.tier <= 2:
-
-            action = DecisionAction.BUY
-
+        action = DecisionAction.BUY
         if opportunity.confidence < self.minimum_confidence:
-            warnings.append(f"Confidence below minimum ({opportunity.confidence:.2f}).")
+            warnings.append(
+                f"Confidence below minimum ({opportunity.confidence:.2f})."
+        )
+            action = DecisionAction.WAIT
+            
+        if opportunity.quality < self.minimum_score:
+            warnings.append(
+                f"Score below minimum ({opportunity.quality:.2f})."
+            )
             action = DecisionAction.WAIT
 
-        if opportunity.quality < self.minimum_score:
-            warnings.append(f"Score below minimum ({opportunity.quality:.2f}).")
-            action = DecisionAction.WAIT
+        
 
         return Decision(
 
@@ -1451,159 +1090,14 @@ class Brain:
 
             warnings=warnings,
 
-            evidence_used=len(evidence_list)
+            evidence_used=len(evidence_list),
+
+            opportunity=opportunity
 
         )
 
     # --------------------------------------------------
-
-    def _calculate_capital_allocation(
-        self,
-        opportunity: Opportunity,
-        conviction: float
-    ):
-
-        """
-        Decide how aggressively capital should
-        be deployed.
-
-        Quantity is NOT decided here.
-
-        PositionManager converts this into shares.
-        """
-
-        allocation = CapitalAllocation()
-
-        allocation.conviction = conviction
-
-        # ----------------------------------------
-
-        if conviction >= 95:
-
-            allocation.tier = 1
-
-            allocation.allocation = "FULL"
-
-            allocation.reason = (
-                "Exceptional institutional opportunity."
-            )
-
-        elif conviction >= 85:
-
-            allocation.tier = 2
-
-            allocation.allocation = "HIGH"
-
-            allocation.reason = (
-                "High conviction opportunity."
-            )
-
-        elif conviction >= 70:
-
-            allocation.tier = 3
-
-            allocation.allocation = "MEDIUM"
-
-            allocation.reason = (
-                "Good opportunity."
-            )
-
-        else:
-
-            allocation.tier = 4
-
-            allocation.allocation = "NONE"
-
-            allocation.reason = (
-                "Capital better deployed elsewhere."
-            )
-
-        return allocation
-
-    # --------------------------------------------------
-
-    def _determine_entry_mode(
-        self,
-        intelligence: OpportunityIntelligence,
-        conviction: float,
-        allocation: CapitalAllocation
-    ):
-
-        """
-        Decide how this opportunity should
-        be entered.
-        """
-
-        # ------------------------------------------
-        # Exceptional Opportunities
-        # ------------------------------------------
-
-        if (
-
-            allocation.tier == 1
-
-            and intelligence.news_strength >= 90
-
-            and intelligence.volume_strength >= 85
-
-            and intelligence.relative_strength >= 85
-
-        ):
-
-            return "EARLY"
-
-        # ------------------------------------------
-
-        if allocation.tier <= 2:
-
-            return "ORB_CONFIRMATION"
-
-        # ------------------------------------------
-
-        return "WAIT"
-
-    # --------------------------------------------------
-
-    def _determine_target_mode(
-        self,
-        conviction: float,
-        lifecycle: OpportunityLifecycle
-    ):
-
-        """
-        Decide how profits should be managed.
-        """
-
-        if (
-
-            conviction >= 90
-
-            and lifecycle.stage in (
-
-                "DISCOVERY",
-
-                "CONFIRMATION",
-
-                "ACCELERATION"
-
-            )
-
-        ):
-
-            return "DYNAMIC"
-
-        if lifecycle.stage == "MATURITY":
-
-            return "TRAIL"
-
-        if lifecycle.stage == "EXHAUSTION":
-
-            return "QUICK_EXIT"
-
-        return "FIXED"
-
-    # --------------------------------------------------
-
+    
     def _update_opportunity(
         self,
         symbol,
@@ -1688,18 +1182,11 @@ class Brain:
         self.opportunities[symbol] = opportunity
 
         # --------------------------------------------------
-        # Rank All Opportunities Across the Registry
+        # Portfolio Intelligence
         # --------------------------------------------------
-
-        self._rank_opportunities()
-
-        # --------------------------------------------------
-        # Contextual Peer Comparison
-        # --------------------------------------------------
-
-        comparison = self._compare_opportunities(
-            opportunity
-        )
+        # Portfolio-wide ranking and peer comparison are
+        # handled by PortfolioRiskManager.
+        comparison = None
 
         # --------------------------------------------------
         # Extract Intelligence Snapshot
@@ -1714,30 +1201,22 @@ class Brain:
         )
 
         # --------------------------------------------------
-        # Build Market-Wide Macro Narrative Story
+        # Market Story
         # --------------------------------------------------
-
-        all_intelligence = [
-            op.intelligence for op in self.opportunities.values() 
-            if op.intelligence is not None
-        ]
-        
-        self._build_market_story(all_intelligence)
+        # MarketStoryEngine owns market story construction.
+        # Brain consumes market story produced by that engine.
 
         # --------------------------------------------------
-        # Apply Portfolio Context
+        # Portfolio Context
         # --------------------------------------------------
-        self._apply_portfolio_context(
-            opportunity,
-            comparison
-        )
+        # PortfolioRiskManager owns portfolio decisions.
+        # Brain evaluates only this opportunity.
 
         # --------------------------------------------------
-        # Apply Dynamic Replacement Engine Evaluation
+        # Replacement Candidate
         # --------------------------------------------------
-        self._find_replacement_candidate(
-            opportunity
-        )
+        # Portfolio replacement decisions are handled by
+        # PortfolioRiskManager.
 
         # --------------------------------------------------
         # Build Decision

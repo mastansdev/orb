@@ -98,7 +98,8 @@ class SectorEngine:
     # --------------------------------------------------
 
     def update(self, symbol, ltp, change):
-        print(f"SECTOR UPDATE -> {symbol}  Change={change}")
+        # DEBUG ONLY
+        # print(f"SECTOR UPDATE -> {symbol}  Change={change}")
 
         sector = master_loader.get_sector(symbol)
 

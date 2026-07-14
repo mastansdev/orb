@@ -29,6 +29,9 @@ Author : H&M ORB AUTO TRADER
 
 from collections import deque
 from datetime import datetime
+from intelligence_repository import (
+    IntelligenceRepository,
+)
 import hashlib
 import sqlite3
 from typing import List
@@ -41,12 +44,11 @@ from news_classifier import NewsClassifier
 from market_story_builder import (
     MarketStoryBuilder,
 )
-from impact_engine import (
-    ImpactEngine,
-)
-from news_evidence_builder import (
-    NewsEvidenceBuilder,
-)
+# ImpactEngine ownership moved to Brain
+#from impact_engine import (ImpactEngine,)
+#from news_evidence_builder import (
+#    NewsEvidenceBuilder,
+#)
 
 
 class NewsEngine:
@@ -61,7 +63,9 @@ class NewsEngine:
 
         self.classifier = NewsClassifier()
         self.story_builder = MarketStoryBuilder()
-        self.impact_engine = ImpactEngine()
+        # Temporary:
+        # ImpactEngine ownership moved to Brain.
+        # self.impact_engine = ImpactEngine()
         
         # Market Intelligence State
         # Use the shared instances owned by Engine.
@@ -69,7 +73,11 @@ class NewsEngine:
         self.market_memory = context.market_memory
         self.market_environment = context.market_environment
         
-        self.evidence_builder = NewsEvidenceBuilder()
+        # Temporary:
+        # NewsEvidenceBuilder ownership moved to Brain.
+        #self.evidence_builder = NewsEvidenceBuilder()
+        self.repository = IntelligenceRepository()
+
 
         self.db = sqlite3.connect(
             "news_engine.db",
@@ -208,43 +216,55 @@ class NewsEngine:
             # ----------------------------------------------
             for story in stories:
 
-                impact = self.impact_engine.evaluate(
-                    story
+                # Temporary:
+                # Impact ownership has moved to Brain.
+                
+                # impact = self.impact_engine.evaluate(
+                #      story
+                # )
+
+                # ------------------------------------------
+                # Persist Intelligence
+                # ------------------------------------------
+
+                self.repository.save_story(
+                     story,
+                    
                 )
 
                 # ------------------------------------------
                 # Update Market Intelligence State
                 # ------------------------------------------
 
-                self.market_catalyst.activate(
-                    impact
-                )
+               #self.market_catalyst.activate(
+               #    impact
+               #)
 
-                self.market_memory.remember(
-                    impact
-                )
+               #self.market_memory.remember(
+               #    impact
+               #)
 
-                self.market_environment.update(
-                    impact
-                )
+               #self.market_environment.update(
+               #    impact
+               #)
 
                 # ------------------------------------------
                 # Evidence
                 # ------------------------------------------
 
-                evidence = self.evidence_builder.build(
-                    story,
-                    impact
-                )
+                #evidence = self.evidence_builder.build(
+                #    story,
+                #    impact
+                #)
 
                 # Evidence is returned to the caller.
                 # Brain integration is handled by engine.py.
-                evidence_list.append(
-                    evidence
-                )
+                #evidence_list.append(
+                #    evidence
+                #)
 
         return evidence_list
-
+   
     # --------------------------------------------------
 
     def _validate(self, news: RawNews):

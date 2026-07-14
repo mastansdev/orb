@@ -12,7 +12,7 @@ DECISION_TRACE = True
 # ==========================
 # ACCOUNT
 # ==========================
-CAPITAL = 40000
+CAPITAL = 10000000
 
 # ==========================
 # POSITION
@@ -21,9 +21,9 @@ RISK_MODE = "PERCENT"        # PERCENT / FIXED
 RISK_PER_TRADE = 0.01        # 1% of Capital
 FIXED_RISK = 1000            #  Used when RISK_MODE = "FIXED"
 
-MAX_CAPITAL_PER_TRADE = CAPITAL
+MAX_CAPITAL_PER_TRADE = 100000
 
-MAX_OPEN_POSITIONS = 20
+MAX_OPEN_POSITIONS = 100
 
 
 # ==========================
@@ -32,7 +32,7 @@ MAX_OPEN_POSITIONS = 20
 
 BROKER_ACCOUNT = "PRIMARY"
 
-LIVE_CAPITAL = 40000
+LIVE_CAPITAL = 10000000
 
 # ==========================
 # STRATEGY

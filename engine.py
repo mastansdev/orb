@@ -8,6 +8,8 @@ from open_position_manager import OpenPositionManager
 from trade_selection_engine import TradeSelectionEngine
 from config import ORB_BUFFER, ENTRY_BUFFER
 
+from trade_policy_manager import TradePolicyManager
+
 from day_summary import DaySummary
 from watchdog import Watchdog
 from bot_monitor import BotMonitor
@@ -140,6 +142,7 @@ class Engine:
         self.broker_sync = BrokerSync()
         self.risk_manager = RiskManager()
         self.portfolio_risk_manager = PortfolioRiskManager()
+        self.trade_policy_manager = TradePolicyManager()
         self.decision_audit = DecisionAudit()
         self.portfolio_ledger = PortfolioLedger()
 
@@ -275,9 +278,13 @@ class Engine:
             # --------------------------------------------------
             # Broker Synchronization
             # --------------------------------------------------
-            if trade is not None:
-                if not self.broker_sync.has_position(security_id):
-                    print(f"⚠ Manual Exit Detected : {symbol}")
+            if self.execution.mode == "LIVE":
+
+                if trade is not None:
+                    
+                    if not self.broker_sync.has_position(security_id):
+
+                        print(f"⚠ Manual Exit Detected : {symbol}")
 
                     # Remove internal tracking states
                     self.position_manager.remove_position(security_id)
@@ -394,17 +401,21 @@ class Engine:
                         return
 
                     # Validate macro structural layout risk constraints
+
+                    if brain is None:
+                        print(f"❌ No Brain decision available for {symbol}")
+                        return
+                    
                     portfolio_decision = self.portfolio_risk_manager.can_take_trade(
-                        symbol=symbol,
-                        intelligence=intelligence
-                    )
+                        opportunity=brain.opportunity 
+                        )
 
                     self.decision_audit.record_portfolio_decision(
                         security_id=security_id,
                         portfolio_decision=portfolio_decision
                     )
 
-                    if not portfolio_decision["allowed"]:
+                    if not portfolio_decision.allowed:
                         self.monitor.increment("portfolio_rejected")
                         return
 
@@ -422,22 +433,46 @@ class Engine:
                         print("====================================\n")
 
                     stop_loss = orb["low"] - ORB_BUFFER
+
                     qty = self.position_manager.open_position(
                         security_id, symbol, ltp, stop_loss
                     )
 
+                    # PositionManager could not calculate a valid quantity
                     if qty <= 0:
-                        self.monitor.increment("insufficient_capital")
+                         self.monitor.increment("insufficient_capital")
+                         return
+                    
+                    trade_value = qty * ltp
+
+                    policy = self.trade_policy_manager.validate(
+                        quantity=qty,
+                        trade_value=trade_value
+                    )
+
+                    if not policy.approved:
+
+                        print(f"TRADE POLICY REJECTED : {policy.reason}")
+
                         return
 
                     execution_result = self.execution.buy(security_id, symbol, ltp, qty)
                     if not execution_result["success"]:
                         return
 
-                    if not self.position_manager.confirm_position(
-                        security_id, symbol, ltp, stop_loss, qty
-                    ):
-                        return
+                    confirmed = self.position_manager.confirm_position(
+                         security_id,
+                         symbol,
+                         ltp,
+                         stop_loss,
+                         qty
+                    )
+
+                    print(f"DEBUG CONFIRM -> {confirmed}")
+                    
+                    if not confirmed:
+                         print("DEBUG -> Position confirmation failed")
+                         return
                     
                     print(f"BUY : {symbol} @ {ltp:.2f} Qty:{qty}")
 
@@ -477,7 +512,7 @@ class Engine:
                         }
                     )
 
-                    self.portfolio_risk_manager.add_trade(symbol)
+                    self.portfolio_risk_manager.add_trade(brain.opportunity)
 
                     if __debug__:
                         assert symbol in self.portfolio_risk_manager.open_trades, (

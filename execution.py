@@ -21,10 +21,12 @@ class Execution:
 
         if TRADING_MODE.upper() == "LIVE":
             self.executor = LiveExecution()
+            self.mode = "LIVE"
             print("Execution Mode : LIVE")
 
         else:
             self.executor = PaperExecution()
+            self.mode = "PAPER"
             print("Execution Mode : PAPER")
 
     # --------------------------------------------------

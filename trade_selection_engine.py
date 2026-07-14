@@ -44,6 +44,14 @@ class TradeSelectionEngine:
         # Institutional Decision Pipeline
         # ---------------------------------
         evidence = self.evidence_builder.build(intelligence)
+
+        self.brain.update_intelligence()
+
+        news_evidence = self.brain.build_news_evidence()
+        print(f"[BRAIN] News Evidence Loaded : {len(news_evidence)}")
+        
+        all_evidence = evidence + news_evidence
+
         validated_evidence = self.evidence_validator.validate(evidence)
         conviction = self.conviction_engine.evaluate(validated_evidence)
 

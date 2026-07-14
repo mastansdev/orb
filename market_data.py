@@ -247,7 +247,9 @@ while True:
                         symbol,
                         float(tick["prev_close"])
                     )
-                    print(f"PREV CLOSE SET -> {symbol} = {tick['prev_close']}")
+                    # dEBUG ONLY
+                    # print(f"PREV CLOSE SET -> {symbol} = {tick['prev_close']}")
+                
 
                 continue
 
