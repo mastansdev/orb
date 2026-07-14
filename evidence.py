@@ -1,3 +1,10 @@
+# =============================================================================
+# CORE ARCHITECTURE FILE
+#
+# This file is considered STABLE.
+# Do not modify unless a project-wide architectural change is approved.
+# =============================================================================
+
 """
 ==========================================================
 Evidence

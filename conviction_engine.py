@@ -53,7 +53,7 @@ class ConvictionEngine:
         providers = {}
 
         for evidence in evidence_list:
-            provider = evidence.get("provider")
+            provider = evidence.provider
             if provider:
                 providers[provider] = evidence
 

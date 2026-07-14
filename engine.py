@@ -51,6 +51,8 @@ from market_memory import MarketMemory
 from market_environment import MarketEnvironment
 from news_engine import NewsEngine
 
+from intelligence_context import IntelligenceContext
+
 load_dotenv()
 
 
@@ -86,19 +88,30 @@ class Engine:
         self.market_memory = MarketMemory()
         self.market_environment = MarketEnvironment()
 
+        # ---------------------------------
+        # Intelligence Context
+        # ---------------------------------
+
+        self.intelligence_context = IntelligenceContext()
+        self.intelligence_context.market_catalyst = self.market_catalyst
+        self.intelligence_context.market_memory = self.market_memory
+        self.intelligence_context.market_environment = self.market_environment
+
+        # ---------------------------------
         # News Intelligence Pipeline
-        self.news_engine = NewsEngine(self)
+        # ---------------------------------
+
+        self.news_engine = NewsEngine(self.intelligence_context)
         self.news_collector = NewsRSSCollector()
         self.bse_corporate_collector = BSECorporateCollector()
-
-
+        
         # Register News Sources
         self.news_engine.register_collector(self.news_collector)
-        
         self.news_engine.register_collector(
             self.bse_corporate_collector
         )
 
+        
         # Legacy components retained temporarily during migration.
         # They will be removed after the NewsEngine migration
         # is fully completed and verified.

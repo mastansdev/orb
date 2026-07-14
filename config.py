@@ -12,7 +12,7 @@ DECISION_TRACE = True
 # ==========================
 # ACCOUNT
 # ==========================
-CAPITAL = 50000
+CAPITAL = 40000
 
 # ==========================
 # POSITION
@@ -32,7 +32,7 @@ MAX_OPEN_POSITIONS = 20
 
 BROKER_ACCOUNT = "PRIMARY"
 
-LIVE_CAPITAL = 50000
+LIVE_CAPITAL = 40000
 
 # ==========================
 # STRATEGY

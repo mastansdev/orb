@@ -22,6 +22,7 @@ class TelegramCommandCenter:
             "/mtm": self.cmd_mtm,
             "/positions": self.cmd_positions,
             "/health": self.cmd_health,   
+            "/tickaudit": self.cmd_tick_audit,
 
             "/pause": self.cmd_pause,
             "/resume": self.cmd_resume,
@@ -185,6 +186,13 @@ class TelegramCommandCenter:
 
     # ---------------------------------
 
+    def cmd_tick_audit(self, args):
+        self.engine.telegram.send(
+            "Tick Audit - Under Construction"
+        )
+
+    # ---------------------------------
+
     def cmd_pause(self, args):
         self.engine.pause()
         self.engine.telegram.send(
@@ -217,6 +225,7 @@ class TelegramCommandCenter:
             "✅ TRADING ENABLED"
         )
 
+    # ---------------------------------
     
     def cmd_exit_all(self, args):
         result = self.engine.exit_all()
@@ -236,7 +245,8 @@ class TelegramCommandCenter:
             "/capital\n"
             "/mtm\n"
             "/positions\n"
-            "/health\n\n"
+            "/health\n"
+            "/tickaudit\n\n"
             "/pause\n"
             "/resume\n\n"
             "/tradingoff\n"

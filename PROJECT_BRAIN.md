@@ -1,3 +1,13 @@
+###### Allocate capital where institutional probability of continuation is highest, and withdraw capital immediately when that probability deteriorates. - Highest Priority
+
+Capital is scarce. Every trade must justify why it deserves capital over the other 749 stocks.
+Every position is temporary. The Brain continuously re-evaluates whether the original reason for owning the stock still exists.
+Capital has an opportunity cost. A better opportunity may justify rotating capital from an existing position.
+Evidence changes conviction. News, government actions, results, sector rotation, market behaviour, and live price action continuously update the Brain's conviction.
+Execution is a tool, not the strategy. ORB is today's entry mechanism. The Brain decides whether capital should be allocated; execution decides how.
+
+
+
 # ORB AUTO TRADER – PROJECT CONTINUATION PROMPT
 
 You are continuing development of my ORB Auto Trader. This is NOT a new project.

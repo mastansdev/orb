@@ -51,9 +51,9 @@ from news_evidence_builder import (
 
 class NewsEngine:
 
-    def __init__(self, engine):
+    def __init__(self, context):
 
-        self.engine = engine
+        self.context = context
 
         self.collectors = []
 
@@ -65,9 +65,9 @@ class NewsEngine:
         
         # Market Intelligence State
         # Use the shared instances owned by Engine.
-        self.market_catalyst = engine.market_catalyst
-        self.market_memory = engine.market_memory
-        self.market_environment = engine.market_environment
+        self.market_catalyst = context.market_catalyst
+        self.market_memory = context.market_memory
+        self.market_environment = context.market_environment
         
         self.evidence_builder = NewsEvidenceBuilder()
 

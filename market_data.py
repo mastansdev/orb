@@ -11,6 +11,7 @@ from websockets.exceptions import ConnectionClosedError
 from watchlist import get_instruments
 from instrument_loader import InstrumentLoader
 from engine import Engine
+from price_engine import price_engine
 from error_logger import ErrorLogger
 from event_logger import event_logger
 from telegram_command_center import TelegramCommandCenter
@@ -45,6 +46,11 @@ context = DhanContext(
 
 instruments = get_instruments()
 
+expected_ticks = {
+    str(item[1]): False
+    for item in instruments
+}
+
 # Extract security IDs for historical preloading
 security_ids = [
     str(item[1]) for item in instruments
@@ -64,10 +70,6 @@ event_logger.system(
     }
 )
 
-
-# --------------------------------------------------
-# LIVE MARKET LOOP INITIALIZATION
-# --------------------------------------------------
 
 # --------------------------------------------------
 # HISTORICAL ORB SCHEDULER
@@ -166,6 +168,10 @@ threading.Thread(
 
 print("News Intelligence Scheduler Started")
 
+# --------------------------------------------------
+# LIVE MARKET LOOP INITIALIZATION
+# --------------------------------------------------
+
 startup_message_sent = False
 
 while True:
@@ -213,19 +219,42 @@ while True:
             )
 
         print("Calling run_forever()...")
+        
+        # Note: If your framework runs asynchronously in the background, 
+        # the tick loop below captures the data.
         feed.run_forever()
         
-        print("⚠️ run_forever() returned / connection dropped")
+        print("Processing live feed ticks...")
 
         while True:
 
             tick = feed.get_data()
-
             if tick is None:
                 time.sleep(0.001)
                 continue
 
-            if tick["type"] != "Ticker Data":
+            # ---------------------------------
+            # Previous Close Messages
+            # ---------------------------------
+            if tick.get("type") == "Previous Close":
+
+                security_id = str(tick["security_id"])
+
+                symbol = loader.get_symbol(security_id)
+
+                if symbol is not None:
+                    price_engine.set_previous_close(
+                        symbol,
+                        float(tick["prev_close"])
+                    )
+                    print(f"PREV CLOSE SET -> {symbol} = {tick['prev_close']}")
+
+                continue
+
+            # ---------------------------------
+            # Ignore everything except live ticks
+            # ---------------------------------
+            if tick.get("type") != "Ticker Data":
                 continue
 
             security_id = str(tick["security_id"])
@@ -235,6 +264,11 @@ while True:
             if symbol is None:
                 print(f"Unknown Security ID : {security_id}")
                 continue
+            
+            # Optional: Flip the expected_ticks flag to True when the first tick arrives
+            if expected_ticks.get(security_id) is False:
+                expected_ticks[security_id] = True
+                
             
             engine.process_tick(
                 security_id=security_id,

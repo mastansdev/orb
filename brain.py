@@ -384,6 +384,198 @@ class Brain:
 
     # --------------------------------------------------
 
+    def _identify_market_story(
+            self,
+            intelligence: OpportunityIntelligence
+    ):
+        
+            """
+            Determine WHY this opportunity exists.
+
+            Responsibility
+            --------------
+            This function interprets market evidence and identifies
+            the dominant reason behind the opportunity.
+
+            It DOES NOT:
+
+                - calculate quality
+                - calculate conviction
+                - allocate capital
+                - make trading decisions
+
+            It ONLY answers:
+
+
+                "What story is the market telling?"
+            """
+
+            story = {
+                "primary_cause": "UNKNOWN",
+                "primary_driver": None,
+                "flow_target": None,
+                "flow_direction": "UNKNOWN",
+                "flow_breadth": "UNKNOWN",
+                "market_leaders": [],
+                "supporting": [],
+                "contradicting": []
+            }
+
+            # --------------------------------------------------
+            # Collect available evidence
+            # --------------------------------------------------
+            evidence = {
+                "SECTOR": intelligence.sector_strength,
+                "INDUSTRY": intelligence.industry_strength,
+                "THEME": intelligence.theme_strength,
+                "NEWS": intelligence.news_strength,
+                "RESULTS": intelligence.results_strength,
+                "GOVERNMENT": intelligence.government_strength,
+                "VOLUME": intelligence.volume_strength,
+                "RELATIVE_STRENGTH": intelligence.relative_strength,
+                "MARKET": intelligence.market_strength
+            }
+
+            # --------------------------------------------------
+            # Rank evidence by strength
+            # --------------------------------------------------
+            ranked_evidence = sorted(
+                evidence.items(),
+                key=lambda item: item[1],
+                reverse=True
+            )
+
+            # --------------------------------------------------
+            # Classify evidence
+            # --------------------------------------------------
+            cause_evidence = {
+                "NEWS": intelligence.news_strength,
+                "RESULTS": intelligence.results_strength,
+                "GOVERNMENT": intelligence.government_strength
+            }
+            flow_evidence = {
+                "SECTOR": intelligence.sector_strength,
+                "INDUSTRY": intelligence.industry_strength,
+                "THEME": intelligence.theme_strength
+            }
+            confirmation_evidence = {
+                "RELATIVE_STRENGTH": intelligence.relative_strength,
+                "VOLUME": intelligence.volume_strength,
+                "MARKET": intelligence.market_strength
+            }
+
+            story = self._reason_about_market_story(
+                story=story,
+                ranked_evidence=ranked_evidence,
+                cause_evidence=cause_evidence,
+                flow_evidence=flow_evidence,
+                confirmation_evidence=confirmation_evidence
+            )
+
+            return story
+
+    # --------------------------------------------------
+
+    def _reason_about_market_story(
+            self,
+            story,
+            ranked_evidence,
+            cause_evidence,
+            flow_evidence,
+            confirmation_evidence
+    ):
+        """
+        Determine the dominant market story from the prepared evidence.
+        
+        """
+        
+        active_causes = {
+            name: strength
+            for name, strength in cause_evidence.items()
+            if strength > 0
+        }
+
+        if not active_causes:
+            return story
+        
+        # --------------------------------------------------
+        # Generate possible market hypotheses
+        # --------------------------------------------------
+
+        hypotheses = []
+
+        # Company-specific possibility
+        if (
+            cause_evidence["RESULTS"] > 0
+            or cause_evidence["NEWS"] > 0
+        ):
+            hypotheses.append("COMPANY_SPECIFIC")
+
+        # Government-driven possibility
+        if cause_evidence["GOVERNMENT"] > 0:
+            hypotheses.append("GOVERNMENT_DRIVEN")
+
+        if not hypotheses:
+            return story
+
+        for hypothesis in hypotheses:
+            hypothesis_valid = True
+            story["primary_cause"] = hypothesis
+
+        # --------------------------------------------------
+        # Validate COMPANY_SPECIFIC hypothesis
+        # --------------------------------------------------
+
+        if story["primary_cause"] == "COMPANY_SPECIFIC":
+             
+             if (
+                 flow_evidence["SECTOR"] == 0
+                 and flow_evidence["INDUSTRY"] == 0
+                 and flow_evidence["THEME"] == 0
+            ):
+                story["supporting"].append(
+                     "Peers are not participating"
+                )
+
+             else:
+            
+                story["contradicting"].append (
+                    "Sector / Industry participation detected"
+                )
+
+                hypothesis_valid = False
+
+
+        return story
+  
+    # --------------------------------------------------
+
+    def _observe_market_behaviour(
+            self,
+            intelligence: OpportunityIntelligence
+    ):
+        """
+        Observe how the market is behaving.
+        
+        This function DOES NOT decide anything.
+
+        It only reports what it sees.
+        """
+
+        observation = {
+            "behaviour": "UNKNOWN",
+            "leaders": [],
+            "followers": [],
+            "laggards": [],
+            "capital_flow": "UNKNOWN",
+            "confidence": 0.0,
+            "notes": []
+        }
+
+        return observation
+
+    # --------------------------------------------------
+
     def _calculate_opportunity_quality(
         self,
         intelligence: OpportunityIntelligence
@@ -409,6 +601,20 @@ class Brain:
             intelligence.continuation_probability
 
         ]
+
+        print("\n========== QUALITY INPUTS ==========")
+        print(f"Sector               : {intelligence.sector_strength}")
+        print(f"Industry             : {intelligence.industry_strength}")
+        print(f"Theme                : {intelligence.theme_strength}")
+        print(f"News                 : {intelligence.news_strength}")
+        print(f"Results              : {intelligence.results_strength}")
+        print(f"Government           : {intelligence.government_strength}")
+        print(f"Volume               : {intelligence.volume_strength}")
+        print(f"Relative Strength    : {intelligence.relative_strength}")
+        print(f"Market Strength      : {intelligence.market_strength}")
+        print(f"Market Mood          : {intelligence.market_mood}")
+        print(f"Continuation         : {intelligence.continuation_probability}")
+        print("====================================\n")
 
         quality = sum(positive) / len(positive)
 
