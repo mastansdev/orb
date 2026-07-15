@@ -44,16 +44,10 @@ from news_classifier import NewsClassifier
 from market_story_builder import (
     MarketStoryBuilder,
 )
-# ImpactEngine ownership moved to Brain
-#from impact_engine import (ImpactEngine,)
-#from news_evidence_builder import (
-#    NewsEvidenceBuilder,
-#)
-
 
 class NewsEngine:
 
-    def __init__(self, context):
+    def __init__(self, context=None):
 
         self.context = context
 
@@ -63,21 +57,18 @@ class NewsEngine:
 
         self.classifier = NewsClassifier()
         self.story_builder = MarketStoryBuilder()
-        # Temporary:
-        # ImpactEngine ownership moved to Brain.
-        # self.impact_engine = ImpactEngine()
         
         # Market Intelligence State
-        # Use the shared instances owned by Engine.
-        self.market_catalyst = context.market_catalyst
-        self.market_memory = context.market_memory
-        self.market_environment = context.market_environment
+        if context is not None:
+            self.market_catalyst = context.market_catalyst
+            self.market_memory = context.market_memory
+            self.market_environment = context.market_environment
+        else:
+            self.market_catalyst = None
+            self.market_memory = None
+            self.market_environment = None
         
-        # Temporary:
-        # NewsEvidenceBuilder ownership moved to Brain.
-        #self.evidence_builder = NewsEvidenceBuilder()
         self.repository = IntelligenceRepository()
-
 
         self.db = sqlite3.connect(
             "news_engine.db",
@@ -203,10 +194,6 @@ class NewsEngine:
             # ----------------------------------------------
             # Market Stories
             # ----------------------------------------------
-            # TODO:
-            # MarketStoryBuilder currently returns all active stories.
-            # Future version should return only newly created or
-            # updated stories to avoid duplicate evidence generation.
             stories = self.story_builder.build(
                 [classified_news]
             )
@@ -215,13 +202,6 @@ class NewsEngine:
             # Impact
             # ----------------------------------------------
             for story in stories:
-
-                # Temporary:
-                # Impact ownership has moved to Brain.
-                
-                # impact = self.impact_engine.evaluate(
-                #      story
-                # )
 
                 # ------------------------------------------
                 # Persist Intelligence
@@ -232,39 +212,8 @@ class NewsEngine:
                     
                 )
 
-                # ------------------------------------------
-                # Update Market Intelligence State
-                # ------------------------------------------
-
-               #self.market_catalyst.activate(
-               #    impact
-               #)
-
-               #self.market_memory.remember(
-               #    impact
-               #)
-
-               #self.market_environment.update(
-               #    impact
-               #)
-
-                # ------------------------------------------
-                # Evidence
-                # ------------------------------------------
-
-                #evidence = self.evidence_builder.build(
-                #    story,
-                #    impact
-                #)
-
-                # Evidence is returned to the caller.
-                # Brain integration is handled by engine.py.
-                #evidence_list.append(
-                #    evidence
-                #)
-
         return evidence_list
-   
+    
     # --------------------------------------------------
 
     def _validate(self, news: RawNews):
