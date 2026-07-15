@@ -56,7 +56,7 @@ class RailwayNewsEngine:
         print(f"[RAILWAY] Collector Registered : {collector.name}")
 
     # --------------------------------------------------
-    # Improved collect() loop with tracking logs
+    # Improved collect() loop with tracking logs and Raw News Monitor
     def collect(self):
         total_news = 0
 
@@ -68,6 +68,21 @@ class RailwayNewsEngine:
 
                 for news in news_items:
                     if self._validate(news):
+                        # --- RAW NEWS MONITOR ---
+                        print()
+                        print("=" * 80)
+                        print("RAW NEWS RECEIVED")
+                        print("=" * 80)
+                        print(f"Source    : {news.source}")
+                        print(f"Headline  : {news.headline}")
+                        print(f"Published : {news.published_at}")
+
+                        if hasattr(news, "url"):
+                            print(f"URL       : {news.url}")
+
+                        print("=" * 80)
+                        # -------------------------
+
                         self.news_queue.append(news)
                         total_news += 1
 
