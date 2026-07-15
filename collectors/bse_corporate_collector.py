@@ -112,14 +112,12 @@ class BSECorporateCollector:
 
             for item in announcements:
                 # Fixed to map correctly to the real BSE JSON payload
-                category = item.get(
-                    "CATEGORYNAME",
-                    ""
+                category = (
+                      item.get("CATEGORYNAME") or ""
                 ).strip()
-                
-                subcategory = item.get(
-                    "SUBCATNAME",
-                    ""
+
+                subcategory = (
+                    item.get("SUBCATNAME") or ""
                 ).strip()
 
                 # 1. Drop ignored categories immediately

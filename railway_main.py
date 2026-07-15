@@ -17,56 +17,11 @@ This service NEVER:
 - Executes Orders
 """
 
-import time
-
-from news_engine import NewsEngine
-
-class RailwayIntelligenceService:
-
-    def __init__(self):
-
-        self.news_engine = NewsEngine()
-
-    def run(self):
-
-        print("=" * 60)
-        print("H&M Railway Intelligence Service")
-        print("=" * 60)
-
-        while True:
-            print("Collecting Market Intelligence...")
-            self.news_engine.run()
-            time.sleep(60)    
-
-if __name__ == "__main__":
-
-    RailwayIntelligenceService().run()
-
-
-"""
-Railway Intelligence Service
-
-Runs 24/7 on Railway.
-
-Responsibilities
-----------------
-- Collect market news
-- Build Market Stories
-- Store institutional intelligence
-- Update PostgreSQL
-
-This service NEVER:
-- Connects to Dhan
-- Loads Master Database
-- Starts Trading
-- Executes Orders
-"""
-
 import logging
 import signal
 import sys
 import time
-from news_engine import NewsEngine
+from railway_news_engine import RailwayNewsEngine
 
 # 1. Setup explicit, unbuffered logging for Railway
 logging.basicConfig(
@@ -79,7 +34,8 @@ logger = logging.getLogger(__name__)
 class RailwayIntelligenceService:
 
     def __init__(self):
-        self.news_engine = NewsEngine()
+        # Updated to use RailwayNewsEngine
+        self.news_engine = RailwayNewsEngine()
         self.running = True
         
         # 2. Capture shutdown signals from Railway
