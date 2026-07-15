@@ -7,7 +7,7 @@ from position_recovery import PositionRecovery
 from open_position_manager import OpenPositionManager
 from trade_selection_engine import TradeSelectionEngine
 from config import ORB_BUFFER, ENTRY_BUFFER
-
+from portfolio_risk_manager import PortfolioOpportunity
 from trade_policy_manager import TradePolicyManager
 
 from day_summary import DaySummary
@@ -185,7 +185,10 @@ class Engine:
             self.open_position_manager.add(security_id, trade)
 
             # Synchronize internal portfolio metrics with recovered state memory
-            self.portfolio_risk_manager.add_trade(trade["symbol"])
+            recovered_opportunity = PortfolioOpportunity(
+                symbol=trade["symbol"]
+            )
+
 
             blocked = trade["entry"] * trade["qty"]
             self.capital_manager.block(blocked)
@@ -605,9 +608,16 @@ class Engine:
                     self.monitor.set_last_trade(f"SELL {symbol} @ {ltp}")
                     
                     self.trade_logger.log_trade(
+                        trade["entry_date"],
+                        trade["entry_time"],
                         datetime.now().strftime("%Y-%m-%d"),
-                        ltt, symbol, trade["entry"], ltp,
-                        trade["qty"], round(pnl, 2), result
+                        ltt,
+                        symbol,
+                        trade["entry"],
+                        ltp,
+                        trade["qty"],
+                        round(pnl, 2),
+                        result
                     )
 
                     self.position_manager.close_position(security_id, pnl)

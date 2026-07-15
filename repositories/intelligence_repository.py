@@ -148,12 +148,11 @@ class IntelligenceRepository:
     def _row_to_story(
             self,
             row
-    ): 
+    ):
         """
         Convert one database row into a
         MarketStory object.
         """
-
         return MarketStory(
             story_id=row[3],
             name=row[2],
@@ -164,16 +163,26 @@ class IntelligenceRepository:
             sector=row[8],
             industry=row[9],
             theme=row[10],
+
             confidence=row[11],
             story_strength=row[12],
+
+            story_direction="UNKNOWN",
+
             priority=row[13],
             lifecycle=row[14],
             expected_duration=row[15],
+
+            supporting_news=[],
+            affected_symbols=[],
+            leading_symbols=[],
+
             evidence_count=row[16],
             contradiction_count=row[17],
+
             created_at=row[1],
-            updated_at=row[18]
-        )
+            updated_at=row[18],
+    )
 
 # --------------------------------------------------
 
@@ -203,7 +212,7 @@ class IntelligenceRepository:
 
             FROM market_stories
 
-            WHERE id > ?
+            WHERE id > %s
 
             ORDER BY id
 

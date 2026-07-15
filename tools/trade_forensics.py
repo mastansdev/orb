@@ -1,7 +1,6 @@
 import os
 import sys
 import csv
-
 from datetime import datetime
 
 # --------------------------------------------------
@@ -23,7 +22,6 @@ from config import TRADE_LOG_FILE
 class TradeForensics:
 
     def __init__(self):
-
         self.file_name = TRADE_LOG_FILE
         self.trades = []
         self.trade_date = datetime.now().strftime("%Y-%m-%d")
@@ -31,7 +29,6 @@ class TradeForensics:
     # --------------------------------------------------
 
     def load_trades(self, trade_date=None):
-
         self.trades.clear()
 
         if trade_date is None:
@@ -40,7 +37,6 @@ class TradeForensics:
         self.trade_date = trade_date
 
         if not os.path.exists(self.file_name):
-
             print(f"\nTrade log not found : {self.file_name}")
             return
 
@@ -50,11 +46,9 @@ class TradeForensics:
             newline="",
             encoding="utf-8"
         ) as file:
-
             reader = csv.DictReader(file)
 
             for row in reader:
-
                 if row["Date"] != trade_date:
                     continue
 
@@ -70,14 +64,12 @@ class TradeForensics:
     # --------------------------------------------------
 
     def print_session_validation(self):
-
         print()
         print("=" * 70)
         print("SESSION VALIDATION")
         print("=" * 70)
 
         if not self.trades:
-
             print("Status          : NO TRADES")
             return
 
@@ -90,29 +82,24 @@ class TradeForensics:
         hh, mm, _ = map(int, first_trade.split(":"))
 
         if hh > 9 or (hh == 9 and mm > 45):
-
             print("Status          : WARNING")
             print("Observation     : Trading started much later than expected.")
             print("Recommendation  : Ignore time-based strategy analysis.")
-
         else:
-
             print("Status          : VALID")
             print("Recommendation  : Session suitable for analysis.")
 
     # --------------------------------------------------
 
     def print_report(self):
-
         print()
         print("=" * 70)
-        print("               ORB AUTO TRADER - TRADE FORENSICS")
+        print("                 ORB AUTO TRADER - TRADE FORENSICS")
         print("=" * 70)
         print(f"Trading Date    : {self.trade_date}")
         print("=" * 70)
 
         if not self.trades:
-
             print("No trades found.")
             print("=" * 70)
             return
@@ -149,14 +136,13 @@ class TradeForensics:
 
         win_rate = len(winners) / total * 100
 
-        largest_winner = max(
-            self.trades,
-            key=lambda x: x["PnL"]
+        largest_winner = (
+            max(winners, key=lambda x: x["PnL"])
+            if winners else None
         )
-
-        largest_loser = min(
-            self.trades,
-            key=lambda x: x["PnL"]
+        largest_loser = (
+            min(losers, key=lambda x: x["PnL"])
+            if losers else None
         )
 
         print(f"Trades          : {total}")
@@ -179,22 +165,28 @@ class TradeForensics:
 
         print()
 
-        print(
-            f"Largest Winner  : {largest_winner['Symbol']} ({largest_winner['PnL']:.2f})"
-        )
+        # --- REPLACED SECTION ---
+        if largest_winner:
+            print(
+                f"Largest Winner  : {largest_winner['Symbol']} ({largest_winner['PnL']:.2f})"
+            )
+        else:
+            print("Largest Winner  : N/A")
 
-        print(
-            f"Largest Loser   : {largest_loser['Symbol']} ({largest_loser['PnL']:.2f})"
-        )
+        if largest_loser:
+            print(
+                f"Largest Loser   : {largest_loser['Symbol']} ({largest_loser['PnL']:.2f})"
+            )
+        else:
+            print("Largest Loser   : N/A")
+        # ------------------------
 
         self.print_session_validation()
 
         exit_analysis = {}
 
         for trade in self.trades:
-
             reason = trade["Reason"]
-
             exit_analysis[reason] = (
                 exit_analysis.get(reason, 0) + 1
             )
@@ -205,7 +197,6 @@ class TradeForensics:
         print("=" * 70)
 
         for reason, count in sorted(exit_analysis.items()):
-
             print(f"{reason:<20}{count}")
 
         print()
@@ -218,7 +209,6 @@ class TradeForensics:
             key=lambda x: x["PnL"],
             reverse=True
         )[:10]:
-
             print(
                 f"{trade['Symbol']:<20}"
                 f"{trade['PnL']:>10.2f}"
@@ -233,7 +223,6 @@ class TradeForensics:
             losers,
             key=lambda x: x["PnL"]
         )[:10]:
-
             print(
                 f"{trade['Symbol']:<20}"
                 f"{trade['PnL']:>10.2f}"
@@ -256,37 +245,27 @@ class TradeForensics:
         }
 
         for trade in self.trades:
-
             hour, minute, _ = map(int, trade["Time"].split(":"))
 
             if hour == 9 and minute < 45:
                 slots["09:30-09:45"].append(trade)
-
             elif hour == 9:
                 slots["09:45-10:00"].append(trade)
-
             elif hour == 10 and minute < 30:
                 slots["10:00-10:30"].append(trade)
-
             elif hour == 10:
                 slots["10:30-11:00"].append(trade)
-
             elif hour == 11:
                 slots["11:00-12:00"].append(trade)
-
             elif hour == 12:
                 slots["12:00-13:00"].append(trade)
-
             elif hour == 13:
                 slots["13:00-14:00"].append(trade)
-
             else:
                 slots["14:00-15:15"].append(trade)
 
         for slot, trades in slots.items():
-
             pnl = sum(t["PnL"] for t in trades)
-
             print(
                 f"{slot:<15}"
                 f"Trades:{len(trades):>4}"
@@ -298,9 +277,6 @@ class TradeForensics:
 
 
 if __name__ == "__main__":
-
     report = TradeForensics()
-
     report.load_trades()
-
     report.print_report()

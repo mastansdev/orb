@@ -3,6 +3,7 @@ from evidence_builder import EvidenceBuilder
 from evidence_validator import EvidenceValidator
 from conviction_engine import ConvictionEngine
 from brain import Brain, DecisionAction
+from tools.decision_trace import DecisionTrace # 1. Import added
 
 class TradeSelectionEngine:
 
@@ -15,6 +16,7 @@ class TradeSelectionEngine:
         self.evidence_validator = EvidenceValidator()
         self.conviction_engine = ConvictionEngine()
         self.brain = Brain()
+        self.decision_trace = DecisionTrace()  # 2. Initialized here
 
     # --------------------------------------------------
 
@@ -52,6 +54,7 @@ class TradeSelectionEngine:
         
         all_evidence = evidence + news_evidence
 
+        # Kept unchanged for live session safety (ignoring news_evidence for now)
         validated_evidence = self.evidence_validator.validate(evidence)
         conviction = self.conviction_engine.evaluate(validated_evidence)
 
@@ -71,6 +74,20 @@ class TradeSelectionEngine:
             self.selected += 1
         else:
             self.skipped += 1
+
+        # 3. Wrapped tracer call in try-except block to guarantee zero trading disruption
+        try:
+            self.decision_trace.trace(
+                symbol=symbol,
+                orb=orb,
+                intelligence=intelligence,
+                evidence=validated_evidence,
+                conviction=conviction,
+                brain_decision=brain_decision,
+                final_decision="BUY" if selected else "REJECT",
+            )
+        except Exception as e:
+            print(f"[DecisionTrace] {e}")
 
         return self._build_decision(
             selected=selected,

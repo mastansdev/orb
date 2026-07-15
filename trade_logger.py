@@ -1,5 +1,6 @@
 import csv
 import os
+from datetime import datetime
 
 from config import TRADE_LOG_FILE
 
@@ -17,12 +18,15 @@ class TradeLogger:
                 writer = csv.writer(file)
 
                 writer.writerow([
-                    "Date",
-                    "Time",
+                    "Entry Date",
+                    "Entry Time",
+                    "Exit Date",
+                    "Exit Time",
+                    "Holding Seconds",
                     "Symbol",
+                    "Qty",
                     "Entry",
                     "Exit",
-                    "Qty",
                     "PnL",
                     "Reason"
                 ])
@@ -31,8 +35,10 @@ class TradeLogger:
 
     def log_trade(
         self,
-        date,
-        time,
+        entry_date,
+        entry_time,
+        exit_date,
+        exit_time,
         symbol,
         entry,
         exit_price,
@@ -45,13 +51,28 @@ class TradeLogger:
 
             writer = csv.writer(file)
 
+            entry_dt = datetime.strptime(
+                f"{entry_date} {entry_time}",
+                "%Y-%m-%d %H:%M:%S"
+            )
+            exit_dt = datetime.strptime(
+                f"{exit_date} {exit_time}",
+                "%Y-%m-%d %H:%M:%S"
+            )
+            holding_seconds = int(
+                (exit_dt - entry_dt).total_seconds()
+            )
+
             writer.writerow([
-                date,
-                time,
+                entry_date,
+                entry_time,
+                exit_date,
+                exit_time,
+                holding_seconds,
                 symbol,
+                int(qty),
                 round(entry, 2),
                 round(exit_price, 2),
-                int(qty),
                 round(pnl, 2),
                 reason
             ])

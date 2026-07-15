@@ -16,6 +16,21 @@ class PortfolioDecision:
 
     replacement_candidate: Optional[object] = None
 
+
+@dataclass
+class PortfolioOpportunity:
+
+    symbol: str
+
+    conviction: float = 0.0
+
+    quality: float = 0.0
+
+
+# ==========================================================
+# Portfolio Risk Manager
+# ==========================================================
+
 class PortfolioRiskManager:
     """
     Portfolio-level admission controller.
@@ -112,7 +127,7 @@ class PortfolioRiskManager:
                 reason=(
                     f"Portfolio Full ({self.max_open_trades})"
                 ),
-               
+                
                 replacement_candidate=weakest
             )
             
@@ -138,4 +153,3 @@ class PortfolioRiskManager:
 
             reason="Portfolio admission approved."
         )
-       
