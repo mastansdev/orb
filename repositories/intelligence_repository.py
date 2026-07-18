@@ -67,6 +67,35 @@ class IntelligenceRepository:
 
         self.db.commit()
 
+        self.cursor.execute(
+        """
+
+        CREATE TABLE IF NOT EXISTS raw_news(
+
+            id SERIAL PRIMARY KEY,
+
+            news_hash TEXT UNIQUE,
+
+            source TEXT,
+
+            headline TEXT,
+
+            published_at TEXT,
+
+            url TEXT,
+
+            processed BOOLEAN DEFAULT FALSE,
+
+            created_at TEXT
+
+        )
+
+        """
+
+        )
+
+        self.db.commit()
+
     # --------------------------------------------------
 
     def save_story(
@@ -143,8 +172,6 @@ class IntelligenceRepository:
 
     # --------------------------------------------------
 
-    # --------------------------------------------------
-
     def _row_to_story(
             self,
             row
@@ -184,7 +211,7 @@ class IntelligenceRepository:
             updated_at=row[18],
     )
 
-# --------------------------------------------------
+    # --------------------------------------------------
 
     def load_intelligence(self):
 
@@ -241,3 +268,75 @@ class IntelligenceRepository:
             )
 
         return stories
+
+    # --------------------------------------------------
+
+    def generate_news_hash(self, news):
+        """
+        Generate a stable unique hash for one news item.
+        """
+        import hashlib
+
+        text = (
+            f"{news.source.value}|"
+            f"{news.headline.strip()}|"
+            f"{news.published_at}"
+        )
+
+        return hashlib.sha256(
+            text.encode("utf-8")
+        ).hexdigest()
+
+    # --------------------------------------------------
+
+    def news_exists(self, news_hash):
+        """
+        Returns True if this news was already stored.
+        """
+        self.cursor.execute(
+            """
+            SELECT 1
+            FROM raw_news
+            WHERE news_hash=%s
+            LIMIT 1
+            """,
+            (
+                news_hash,
+            )
+        )
+        return self.cursor.fetchone() is not None
+
+    # --------------------------------------------------
+
+    def save_raw_news(
+        self,
+        news,
+        news_hash
+    ):
+        """
+        Store raw news before any processing.
+        """
+        self.cursor.execute(
+            """
+            INSERT INTO raw_news(
+                news_hash,
+                source,
+                headline,
+                published_at,
+                url,
+                processed
+            )
+            VALUES(%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (news_hash)
+            DO NOTHING
+            """,
+            (
+                news_hash,
+                news.source.value,
+                news.headline,
+                str(news.published_at),
+                getattr(news, "url", ""),
+                False,
+            )
+        )
+        self.db.commit()
