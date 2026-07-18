@@ -16,6 +16,7 @@ from collectors.news_rss_collector import (
 from news_models import (
     ProcessedNews,
 )
+from symbol_matcher import symbol_matcher
 
 
 class RailwayNewsEngine:
@@ -26,6 +27,7 @@ class RailwayNewsEngine:
     ----------------
     - Receive RawNews
     - Classify News
+    - Match affected stock symbols
     - Build Market Stories
     - Persist Intelligence
 
@@ -146,6 +148,24 @@ class RailwayNewsEngine:
                 processed = ProcessedNews(
                     raw_news=raw_news
                 )
+
+                # --------------------------------------
+                # Symbol Matching
+                #
+                # Matches the headline + description against
+                # the stock universe (company names, tickers,
+                # curated keywords) to identify which specific
+                # stocks this news item affects. Without this,
+                # stories only carry a broad sector/category tag
+                # with no link to an actual tradeable symbol.
+                # --------------------------------------
+                matched_symbols = symbol_matcher.match(
+                    f"{raw_news.headline} {raw_news.description}"
+                )
+                processed.symbols = matched_symbols
+
+                if matched_symbols:
+                    print(f"[SYMBOL MATCH] {matched_symbols}")
                 
                 self.stats_data["processed"] += 1
 
@@ -168,8 +188,8 @@ class RailwayNewsEngine:
                     print(f"Sentiment      : {classified.sentiment}")
                 if hasattr(classified, "confidence"):
                     print(f"Confidence     : {classified.confidence}")
-                if hasattr(classified, "symbols"):
-                    print(f"Symbols        : {classified.symbols}")
+                if hasattr(classified, "affected_symbols"):
+                    print(f"Symbols        : {classified.affected_symbols}")
                 
                 print("=" * 80)
                 # ------------------------------
