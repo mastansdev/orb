@@ -57,17 +57,18 @@ class NewsRSSCollector(BaseCollector):
     def __init__(self):
         super().__init__("NEWS RSS")
         self.feeds = [
-            # Moneycontrol
-            "https://www.moneycontrol.com/rss/business.xml",
-
             # Economic Times Markets
             "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
 
             # LiveMint Markets
             "https://www.livemint.com/rss/markets",
 
-            # Business Standard Markets
-            "https://www.business-standard.com/rss/markets-106.rss"
+            # NOTE: Moneycontrol and Business Standard removed --
+            # both are blocked by anti-bot protection that a
+            # standard header fix could not get past (Moneycontrol:
+            # persistent invalid-feed error; Business Standard:
+            # explicit 403 Forbidden). Revisit later with more
+            # specialized tooling if these sources become important.
         ]
 
     # --------------------------------------------------
