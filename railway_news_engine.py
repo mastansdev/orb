@@ -10,6 +10,9 @@ from market_story_builder import (
 from collectors.bse_corporate_collector import (
     BSECorporateCollector,
 )
+from collectors.news_rss_collector import (
+    NewsRSSCollector,
+)
 from news_models import (
     ProcessedNews,
 )
@@ -50,13 +53,16 @@ class RailwayNewsEngine:
             BSECorporateCollector()
         )
 
+        self.register_collector(
+            NewsRSSCollector()
+        )
+
     # --------------------------------------------------
     def register_collector(self, collector):
         self.collectors.append(collector)
         print(f"[RAILWAY] Collector Registered : {collector.name}")
 
     # --------------------------------------------------
-    # Improved collect() loop with tracking logs and Raw News Monitor
     def collect(self):
         total_news = 0
 
@@ -66,25 +72,53 @@ class RailwayNewsEngine:
                 news_items = collector.collect()
                 print(f"[COLLECTOR] Received : {len(news_items)}")
 
+                duplicates = 0
                 for news in news_items:
-                    if self._validate(news):
-                        # --- RAW NEWS MONITOR ---
-                        print()
-                        print("=" * 80)
-                        print("RAW NEWS RECEIVED")
-                        print("=" * 80)
-                        print(f"Source    : {news.source}")
-                        print(f"Headline  : {news.headline}")
-                        print(f"Published : {news.published_at}")
 
-                        if hasattr(news, "url"):
-                            print(f"URL       : {news.url}")
+                    if not self._validate(news):
+                        continue
 
-                        print("=" * 80)
-                        # -------------------------
+                    news_hash = self.repository.generate_news_hash(
+                        news
+                    )
 
-                        self.news_queue.append(news)
-                        total_news += 1
+                    if self.repository.news_exists(
+                        news_hash
+                    ):
+                        duplicates += 1
+                        continue
+
+                    self.repository.save_raw_news(
+                        news,
+                        news_hash
+                    )
+
+                    # --- RAW NEWS MONITOR ---
+                    print()
+                    print("=" * 80)
+                    print("NEW RAW NEWS")
+                    print("=" * 80)
+                    print(f"Source    : {news.source}")
+                    print(f"Headline  : {news.headline}")
+                    print(f"Published : {news.published_at}")
+
+                    if hasattr(news, "url"):
+                        print(f"URL       : {news.url}")
+
+                    print("=" * 80)
+                    # -------------------------
+
+                    self.news_queue.append(news)
+                    total_news += 1
+
+                print()
+                print("=" * 60)
+                print(f"{collector.name} COLLECTION SUMMARY")
+                print("=" * 60)
+                print(f"Fetched      : {len(news_items)}")
+                print(f"New          : {total_news}")
+                print(f"Duplicates   : {duplicates}")
+                print("=" * 60)
 
             except Exception as e:
                 print(f"[RAILWAY ERROR] {collector.name}")
@@ -118,6 +152,27 @@ class RailwayNewsEngine:
                 classified = self.classifier.classify(
                     processed
                 )
+
+                # --- CLASSIFICATION MONITOR ---
+                print()
+                print("=" * 80)
+                print("CLASSIFICATION")
+                print("=" * 80)
+                print(f"Headline       : {raw_news.headline}")
+                
+                if hasattr(classified, "classification"):
+                    print(f"Classification : {classified.classification}")
+                if hasattr(classified, "priority"):
+                    print(f"Priority       : {classified.priority}")
+                if hasattr(classified, "sentiment"):
+                    print(f"Sentiment      : {classified.sentiment}")
+                if hasattr(classified, "confidence"):
+                    print(f"Confidence     : {classified.confidence}")
+                if hasattr(classified, "symbols"):
+                    print(f"Symbols        : {classified.symbols}")
+                
+                print("=" * 80)
+                # ------------------------------
 
                 stories = self.story_builder.build(
                     [classified]
