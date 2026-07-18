@@ -60,10 +60,24 @@ class IntelligenceRepository:
 
             contradiction_count INTEGER,
 
-            updated_at TEXT
+            updated_at TEXT,
+
+            affected_symbols TEXT[]
         )
 
         """)
+
+        self.db.commit()
+
+        # Safe for both fresh installs (CREATE TABLE above already
+        # includes the column) and the already-running Railway
+        # database (this adds it without touching existing rows).
+        self.cursor.execute(
+        """
+        ALTER TABLE market_stories
+        ADD COLUMN IF NOT EXISTS affected_symbols TEXT[]
+        """
+        )
 
         self.db.commit()
 
@@ -130,11 +144,12 @@ class IntelligenceRepository:
                 expected_duration,
                 evidence_count,
                 contradiction_count,
-                updated_at
+                updated_at,
+                affected_symbols
                 
             )
 
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
 
             """,
 
@@ -163,6 +178,7 @@ class IntelligenceRepository:
                 getattr(story, "evidence_count", 0),
                 getattr(story, "contradiction_count", 0),
                 getattr(story, "updated_at", datetime.now().isoformat()),
+                list(getattr(story, "affected_symbols", []) or []),
 
             )
 
@@ -201,8 +217,8 @@ class IntelligenceRepository:
             expected_duration=row[15],
 
             supporting_news=[],
-            affected_symbols=[],
-            leading_symbols=[],
+            affected_symbols=list(row[19]) if len(row) > 19 and row[19] else [],
+            leading_symbols=list(row[19]) if len(row) > 19 and row[19] else [],
 
             evidence_count=row[16],
             contradiction_count=row[17],
