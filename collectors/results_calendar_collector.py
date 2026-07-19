@@ -6,25 +6,28 @@ Results Calendar Collector (BSE)
 Auto-populates the Results Calendar from the official
 BSE corporate results calendar (next two weeks).
 
-Matching policy (v3 — STRICT + NO GUESSING)
--------------------------------------------
-Two hard rules, because wrong data is worse than no data:
+Matching policy (v4 — mapped to REAL BSE fields)
+------------------------------------------------
+Confirmed BSE resultCalendar() row shape:
 
-1. NAME: resolved by EXACT normalized company-name match
-   against the master universe. No fuzzy matching.
+    scrip_Code   = '532762'
+    short_name   = 'ACE'                 ← the ticker
+    Long_Name    = 'Action Construction Equipment Ltd'
+    meeting_date = '20 Jul 2026'         ← '%d %b %Y'
+    URL          = 'https://...'
 
-2. DATE: taken ONLY from a field that actually parses as
-   a date. NEVER guessed from arbitrary row text (that
-   was the bug that scattered companies onto wrong days).
-   If no field parses as a date → the row is SKIPPED.
+Two hard rules, because wrong data is worse than none:
 
-The date field is AUTO-DETECTED per feed: the collector
-finds which column consistently parses as dates and uses
-only that one.
+1. NAME: match short_name DIRECTLY against the universe
+   (it is the ticker). Fall back to exact normalized
+   Long_Name match. No fuzzy matching.
 
-Self-diagnostic: on every fetch it prints the row keys
-and a sample of parsed (symbol, date, source-field) so
-the structure is visible on the first real run.
+2. DATE: parsed strictly from meeting_date; only accepted
+   inside the query window (yesterday..+30d). If it does
+   not parse → the row is SKIPPED. Never guessed.
+
+Self-diagnostic: prints row keys + a sample of parsed
+(symbol → date) on every fetch.
 
 Run: py tools/bse_calendar_probe.py  to dump raw BSE rows.
 
@@ -40,13 +43,20 @@ class ResultsCalendarCollector:
 
     LOOKAHEAD_DAYS = 14
 
-    NAME_KEYS = (
+    # BSE's confirmed date field (with fallbacks)
+    DATE_KEYS = (
+        "meeting_date", "Meeting_Date", "MEETING_DATE",
+        "meetingDate", "date", "Date",
+    )
+
+    # Ticker field (short_name) and full-name field
+    TICKER_KEYS = (
         "short_name", "Short_Name", "SHORT_NAME",
-        "long_name", "Long_Name", "LONG_NAME",
-        "scrip_name", "ScripName", "SCRIP_NAME",
-        "company", "Company", "COMPANY",
-        "companyname", "CompanyName", "Company_Name",
-        "sc_name", "SC_NAME", "name", "Name",
+        "scrip_name", "ScripName",
+    )
+    LONGNAME_KEYS = (
+        "Long_Name", "long_name", "LONG_NAME",
+        "company", "Company", "companyname",
     )
 
     SUFFIX_TOKENS = (
@@ -78,7 +88,8 @@ class ResultsCalendarCollector:
         self.rows_no_date = 0
         self.rows_no_match = 0
 
-        self._name_map = {}
+        self._name_map = {}     # normalized company name → symbol
+        self._symbol_set = set()  # exact tickers in universe
         self._build_name_map()
 
     # --------------------------------------------------
@@ -100,6 +111,8 @@ class ResultsCalendarCollector:
         for symbol, profile in (
             self.company_intelligence.profiles.items()
         ):
+            self._symbol_set.add(symbol.upper())
+
             company_name = profile.get("company_name", "")
             if company_name:
                 normalized = self._normalize(company_name)
@@ -107,28 +120,43 @@ class ResultsCalendarCollector:
                     self._name_map[normalized] = symbol
             self._name_map[symbol.upper()] = symbol
 
-        if self._name_map:
+        if self._symbol_set:
             print(
-                f"[CALENDAR] Strict name map: "
-                f"{len(self._name_map)} entries"
+                f"[CALENDAR] Universe map: "
+                f"{len(self._symbol_set)} tickers, "
+                f"{len(self._name_map)} names"
             )
 
     # --------------------------------------------------
 
+    def resolve(self, ticker, long_name):
+        """
+        Resolve a BSE row to a universe symbol.
+        1. short_name IS the ticker → direct exact match.
+        2. else exact normalized Long_Name match.
+        Never fuzzy. Returns symbol or None.
+        """
+        # 1. Ticker (short_name) direct
+        t = str(ticker or "").strip().upper()
+        if t and t in self._symbol_set:
+            return t
+
+        # 2. Long name exact-normalized
+        normalized = self._normalize(long_name)
+        if normalized:
+            symbol = self._name_map.get(normalized)
+            if symbol:
+                return symbol
+            compact = normalized.replace(" ", "")
+            symbol = self._name_map.get(compact)
+            if symbol:
+                return symbol
+
+        return None
+
+    # Back-compat alias (tests / callers)
     def resolve_symbol(self, raw_name):
-        if not raw_name:
-            return None
-
-        normalized = self._normalize(raw_name)
-        if not normalized:
-            return None
-
-        symbol = self._name_map.get(normalized)
-        if symbol:
-            return symbol
-
-        compact = normalized.replace(" ", "")
-        return self._name_map.get(compact)
+        return self.resolve(raw_name, raw_name)
 
     # --------------------------------------------------
 
@@ -145,23 +173,23 @@ class ResultsCalendarCollector:
         if len(raw) < 6:
             return None
 
-        # Try each known format on the leading date token
-        candidate = raw.split("T")[0].split(" ")[0] \
-            if ("T" in raw or " " in raw) else raw
-
         parsed = None
+
+        # Full string first (handles '20 Jul 2026',
+        # '2026-07-20', '20-07-2026', ISO, etc.)
         for fmt in self.DATE_FORMATS:
             try:
-                parsed = datetime.strptime(candidate, fmt)
+                parsed = datetime.strptime(raw[:20], fmt)
                 break
             except ValueError:
                 continue
 
+        # Then the leading token (handles trailing time)
         if parsed is None:
-            # Try the whole string for formats with spaces
+            token = raw.split("T")[0].split(" ")[0]
             for fmt in self.DATE_FORMATS:
                 try:
-                    parsed = datetime.strptime(raw[:20], fmt)
+                    parsed = datetime.strptime(token, fmt)
                     break
                 except ValueError:
                     continue
@@ -255,15 +283,21 @@ class ResultsCalendarCollector:
                     f"{list(rows[0].keys())}"
                 )
 
-            # Auto-detect THE date field (no guessing)
-            date_key = self._detect_date_key(rows)
+            # Date field: known BSE key first, else detect
+            date_key = None
+            for key in self.DATE_KEYS:
+                if isinstance(rows[0], dict) and key in rows[0]:
+                    date_key = key
+                    break
+            if date_key is None:
+                date_key = self._detect_date_key(rows)
 
             if date_key is None:
                 print(
-                    "[CALENDAR] ⚠ No parseable date field "
-                    "found — refusing to guess. Run "
+                    "[CALENDAR] ⚠ No date field found — "
+                    "refusing to guess. Run "
                     "tools/bse_calendar_probe.py and share "
-                    "the output so the field can be mapped."
+                    "the output."
                 )
                 try:
                     bse.exit()
@@ -278,7 +312,7 @@ class ResultsCalendarCollector:
                     continue
                 self.rows_seen += 1
 
-                # DATE — strictly from the detected field
+                # DATE — strictly from the date field
                 event_date = self._parse_date(
                     row.get(date_key)
                 )
@@ -286,14 +320,20 @@ class ResultsCalendarCollector:
                     self.rows_no_date += 1
                     continue
 
-                # NAME — strict exact match
-                raw_name = ""
-                for key in self.NAME_KEYS:
+                # NAME — short_name (ticker) then Long_Name
+                ticker = ""
+                for key in self.TICKER_KEYS:
                     if row.get(key):
-                        raw_name = str(row[key])
+                        ticker = str(row[key])
                         break
 
-                symbol = self.resolve_symbol(raw_name)
+                long_name = ""
+                for key in self.LONGNAME_KEYS:
+                    if row.get(key):
+                        long_name = str(row[key])
+                        break
+
+                symbol = self.resolve(ticker, long_name)
                 if symbol is None:
                     self.rows_no_match += 1
                     continue
