@@ -1793,6 +1793,102 @@ def test_watchlist_and_decisions():
 
 
 # ==========================================================
+# HOLD Brain (thesis re-evaluation) + Profit Lock
+# ==========================================================
+
+def test_hold_brain_and_profit_lock():
+    print("\nHOLD Brain + Profit Lock")
+
+    from trading.position_thesis import PositionThesisEngine
+    from config import (
+        THESIS_DECAY_FRACTION,
+        PROFIT_LOCK_AT_R,
+        PROFIT_LOCK_FLOOR_R,
+    )
+
+    # Fakes: intelligence + a scorer we control
+    class FakeSelection:
+        def __init__(self, score):
+            self._score = score
+        def score_symbol(self, symbol, intel):
+            return self._score
+
+    class FakeIntel:
+        def get(self, symbol):
+            return {}
+
+    # Trade entered at conviction 80, entered long ago
+    trade = {
+        "conviction": 80,
+        "entry_time": "09:20:00",
+    }
+
+    # Thesis intact (current 70 > floor 44) → HOLD
+    eng = PositionThesisEngine(
+        FakeSelection(70), FakeIntel()
+    )
+    a = eng.advise("X", trade, 100)
+    check("thesis intact → HOLD", a["action"] == "HOLD")
+
+    # Thesis decayed (current 30 < floor 44) → EXIT
+    eng2 = PositionThesisEngine(
+        FakeSelection(30), FakeIntel()
+    )
+    a2 = eng2.advise("X", trade, 100)
+    check(
+        "thesis decayed → THESIS_EXIT",
+        a2["action"] == "THESIS_EXIT"
+    )
+    check(
+        "exit reason explains decay",
+        "decayed" in a2["reason"]
+    )
+
+    # Grace period: fresh entry never thesis-exits
+    from datetime import datetime as _now_dt
+    fresh = {
+        "conviction": 80,
+        "entry_time": _now_dt.now().strftime("%H:%M:%S"),
+    }
+    a3 = eng2.advise("X", fresh, 100)
+    check("grace period holds", a3["action"] == "HOLD")
+
+    # No baseline conviction → HOLD (leave to stops)
+    a4 = eng2.advise(
+        "X", {"conviction": 0, "entry_time": "09:20:00"}, 100
+    )
+    check("no baseline → HOLD", a4["action"] == "HOLD")
+
+    # --- Profit lock in dynamic manager ---
+    from trading.dynamic_trade_manager import (
+        DynamicTradeManager,
+    )
+    mgr = DynamicTradeManager()
+
+    entry, risk, qty = 100.0, 10.0, 10
+    dtrade = {
+        "entry": entry, "risk": risk, "qty": qty,
+        "stop_loss": 90.0, "trail_sl": 90.0,
+        "highest_price": entry, "partial_done": False,
+        "profit_locked": False,
+    }
+
+    # At profit-lock R, the stop floor is raised in-place
+    # (side effect) so the winner cannot go red.
+    price = entry + PROFIT_LOCK_AT_R * risk
+    mgr.advise("X", dtrade, price)
+    expected = round(entry + PROFIT_LOCK_FLOOR_R * risk, 2)
+    check(
+        "profit locked flag set",
+        dtrade.get("profit_locked") is True
+    )
+    check(
+        "stop raised above entry (winner protected)",
+        dtrade["trail_sl"] == expected and expected > entry
+    )
+
+
+# ==========================================================
 # Brain conviction gate (integration)
 # ==========================================================
 
@@ -1843,6 +1939,7 @@ if __name__ == "__main__":
     test_leverage_and_profiles()
     test_reaction_decay()
     test_watchlist_and_decisions()
+    test_hold_brain_and_profit_lock()
     test_brain_gate()
 
     print()

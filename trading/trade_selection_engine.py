@@ -434,6 +434,43 @@ class TradeSelectionEngine:
 
     # --------------------------------------------------
 
+    def score_symbol(self, symbol, intelligence):
+        """
+        READ-ONLY current conviction for a symbol —
+        no brain, no pool, no side effects. Used by the
+        HOLD brain to re-evaluate open-position theses.
+        Returns a 0-100 conviction score (0 on failure).
+        """
+        try:
+            evidence = self.evidence_builder.build(
+                intelligence
+            )
+
+            for engine, sym_arg in (
+                (self.pattern_engine, True),
+                (self.company_intelligence, True),
+                (self.event_intelligence, True),
+                (self.fno_engine, True),
+            ):
+                if engine is None:
+                    continue
+                try:
+                    evidence += engine.build_evidence(symbol)
+                except Exception:
+                    pass
+
+            validated = self.evidence_validator.validate(
+                evidence
+            )
+            snapshot = self.conviction_engine.evaluate(
+                validated
+            )
+            return float(snapshot.get("score") or 0)
+        except Exception:
+            return 0.0
+
+    # --------------------------------------------------
+
     def _build_decision(
         self,
         selected,

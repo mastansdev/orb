@@ -336,6 +336,18 @@ class Engine:
         self.reaction_decay = ReactionDecayEngine(
             repository=self.market_memory.repository
         )
+
+        # HOLD BRAIN : continuously re-scores open
+        # positions and exits when the thesis decays
+        # (withdraw on deterioration).
+        from trading.position_thesis import (
+            PositionThesisEngine,
+        )
+        self.position_thesis = PositionThesisEngine(
+            trade_selection_engine=self.trade_selection_engine,
+            intelligence_engine=self.intelligence_engine,
+            sector_engine=self.sector_engine,
+        )
         # Share with trade selection for evidence scaling
         self.trade_selection_engine.reaction_decay = (
             self.reaction_decay
@@ -1023,6 +1035,26 @@ class Engine:
                 # Dynamic Trade Management
                 # (partial booking / trail ratchet / catalyst exit)
                 # --------------------------------------------------
+                if result == "ACTIVE":
+                    # HOLD BRAIN: exit when the reason to
+                    # own has decayed (withdraw on
+                    # deterioration) — before the stop.
+                    try:
+                        thesis = self.position_thesis.advise(
+                            symbol, trade, ltp
+                        )
+                        if thesis["action"] == "THESIS_EXIT":
+                            print(
+                                f"🧠 THESIS EXIT : {symbol} — "
+                                f"{thesis['reason']}"
+                            )
+                            trade["thesis_exit_reason"] = (
+                                thesis["reason"]
+                            )
+                            result = self.EXIT_SYSTEM
+                    except Exception as thesis_err:
+                        print(f"[THESIS] {thesis_err}")
+
                 if result == "ACTIVE":
                     try:
                         advice = self.dynamic_trade_manager.advise(

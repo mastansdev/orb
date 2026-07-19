@@ -19,7 +19,7 @@ DECISION_TRACE = True
 # Options: "30K" "50K" "1L" "2L" "5L" "10L" "20L"
 #          "30L" "50L" "1CR"   (or a raw number)
 
-CAPITAL_PROFILE = "1L"
+CAPITAL_PROFILE = "10L"
 
 CAPITAL_PROFILES = {
     "30K": 30_000,
@@ -241,6 +241,32 @@ PRICED_IN_FADE_PCT = 5.0
 # During market hours, no story from Railway for this
 # long → Telegram alarm (feed break detection).
 NEWS_STALENESS_MINUTES = 45
+
+# ==========================
+# HOLD BRAIN (continuous thesis re-evaluation)
+# ==========================
+# "Withdraw capital immediately when probability
+# deteriorates." Re-score every open position; exit when
+# the reason to own it has decayed.
+
+THESIS_ENGINE_ENABLED = True
+
+# Exit if current conviction falls below this fraction
+# of the conviction at entry (thesis has decayed).
+THESIS_DECAY_FRACTION = 0.55
+
+# Grace period after entry before thesis-exit can fire
+# (let the trade breathe past entry noise).
+THESIS_GRACE_MINUTES = 5
+
+# ==========================
+# PROFIT PROTECTION (every winner returns something)
+# ==========================
+# Once a trade reaches this R-multiple, the stop can
+# NEVER fall below the locked floor — a real winner
+# will not become a loser.
+PROFIT_LOCK_AT_R = 0.6
+PROFIT_LOCK_FLOOR_R = 0.15   # lock at least +0.15R
 
 # ==========================
 # MEMORY / PATTERNS

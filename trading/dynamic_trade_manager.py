@@ -106,6 +106,36 @@ class DynamicTradeManager:
             }
 
         # ---------------------------------
+        # 1b. PROFIT LOCK — once a trade is a real
+        #     winner, its stop can never fall below the
+        #     locked floor. A winner will NOT become a
+        #     loser. ("Every winner returns something.")
+        # ---------------------------------
+        from config import (
+            PROFIT_LOCK_AT_R,
+            PROFIT_LOCK_FLOOR_R,
+        )
+
+        if (
+            not trade.get("profit_locked", False)
+            and r_multiple >= PROFIT_LOCK_AT_R
+        ):
+            lock_price = round(
+                entry + PROFIT_LOCK_FLOOR_R * risk, 2
+            )
+            current_trail = trade.get(
+                "trail_sl", trade.get("stop_loss", 0)
+            )
+            # Side-effect floor: raise the stop so this
+            # winner cannot become a loser, then CONTINUE
+            # to partial-book / trail as normal.
+            if lock_price > current_trail:
+                trade["trail_sl"] = lock_price
+                trade["trail_active"] = True
+            trade["profit_locked"] = True
+            self.tightens += 1
+
+        # ---------------------------------
         # 2. Partial profit booking
         # ---------------------------------
         if (
