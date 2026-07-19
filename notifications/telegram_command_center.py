@@ -52,6 +52,7 @@ class TelegramCommandCenter:
             "/execution": self.cmd_execution,
             "/causal": self.cmd_causal,
             "/news": self.cmd_news,
+            "/profile": self.cmd_profile,
             "/market": self.cmd_market,
             "/fetchresults": self.cmd_fetch_results,
             "/shock": self.cmd_shock,
@@ -427,6 +428,13 @@ class TelegramCommandCenter:
 
     # ---------------------------------
 
+    def cmd_profile(self, args):
+        self.engine.telegram.send(
+            f"💰 {self.engine.profile_report()}"
+        )
+
+    # ---------------------------------
+
     def cmd_market(self, args):
         self.engine.telegram.send(
             f"🌡️ {self.engine.market_report()}"
@@ -552,6 +560,7 @@ class TelegramCommandCenter:
             "/execution — slippage / fill quality\n"
             "/causal [SYMBOL] — cause-effect chains\n"
             "/news — Railway→Brain pipeline health\n"
+            "/profile — capital / leverage / margin\n"
             "/market — regime + adaptive limits\n"
             "/fetchresults — refresh BSE results calendar\n"
             "/shock CONFIRM — emergency flatten + PE setup\n\n"

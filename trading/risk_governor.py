@@ -461,8 +461,9 @@ class RiskGovernor:
         intended_risk = CAPITAL * RISK_PER_TRADE
 
         # Realistic per-trade risk is capped by position
-        # value: MAX_CAPITAL_PER_TRADE × a typical
-        # intraday stop distance (~2-3% of price).
+        # value: MAX_CAPITAL_PER_TRADE (a leveraged
+        # exposure) × a typical intraday stop distance
+        # (~2-3% of price).
         typical_stop_pct = 0.025
         realistic_risk = (
             MAX_CAPITAL_PER_TRADE * typical_stop_pct

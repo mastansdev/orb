@@ -10,18 +10,64 @@ DECISION_TRACE = True
 
 
 # ==========================
-# ACCOUNT
+# CAPITAL PROFILE  (plug & play)
 # ==========================
-CAPITAL = 10000000
+#
+# Change ONE line to test a different account size —
+# every derived limit below scales automatically.
+#
+# Options: "30K" "50K" "1L" "2L" "5L" "10L" "20L"
+#          "30L" "50L" "1CR"   (or a raw number)
+
+CAPITAL_PROFILE = "1L"
+
+CAPITAL_PROFILES = {
+    "30K": 30_000,
+    "50K": 50_000,
+    "1L": 100_000,
+    "2L": 200_000,
+    "5L": 500_000,
+    "10L": 1_000_000,
+    "20L": 2_000_000,
+    "30L": 3_000_000,
+    "50L": 5_000_000,
+    "1CR": 10_000_000,
+}
+
+# ==========================
+# MIS LEVERAGE (Dhan/Kite style)
+# ==========================
+# Intraday equity margin: SEBI peak-margin floor is 20%
+# of trade value = max 5× leverage. Brokers give 4-5×
+# on liquid names. Paper mode now blocks MARGIN
+# (value ÷ leverage), not full value — so capital
+# requirements match reality.
+
+MIS_LEVERAGE = 5
+
+# ==========================
+# DERIVED ACCOUNT LIMITS
+# (scale with the profile — same % risk at every size)
+# ==========================
+
+CAPITAL = CAPITAL_PROFILES.get(
+    str(CAPITAL_PROFILE).upper(),
+    CAPITAL_PROFILE if isinstance(CAPITAL_PROFILE, int)
+    else 100_000,
+)
+
+BUYING_POWER = CAPITAL * MIS_LEVERAGE
+
+# Position VALUE cap: each position ≤20% of buying
+# power → up to ~5 full-size concurrent positions.
+MAX_CAPITAL_PER_TRADE = int(BUYING_POWER * 0.20)
 
 # ==========================
 # POSITION
 # ==========================
 RISK_MODE = "PERCENT"        # PERCENT / FIXED
-RISK_PER_TRADE = 0.01        # 1% of Capital
+RISK_PER_TRADE = 0.01        # 1% of CAPITAL (equity, not BP)
 FIXED_RISK = 1000            #  Used when RISK_MODE = "FIXED"
-
-MAX_CAPITAL_PER_TRADE = 100000
 
 MAX_OPEN_POSITIONS = 25
 
@@ -48,10 +94,17 @@ MIN_TRADE_VALUE = 25000
 MIN_ORB_RANGE_PERCENT = 1.0
 
 # ==========================
-# DAILY LIMITS
+# DAILY LIMITS  (scale with the profile)
 # ==========================
-DAILY_MAX_LOSS = 5000
-DAILY_MAX_PROFIT = 50000
+# Expressed as % of EQUITY so a 30K account and a 1CR
+# account both risk the same proportion. The Risk
+# Governor further scales these by live market regime.
+
+DAILY_MAX_LOSS_PCT = 0.03     # stop the day at -3% of equity
+DAILY_MAX_PROFIT_PCT = 0.06   # lock the day at +6% of equity
+
+DAILY_MAX_LOSS = int(CAPITAL * DAILY_MAX_LOSS_PCT)
+DAILY_MAX_PROFIT = int(CAPITAL * DAILY_MAX_PROFIT_PCT)
 
 # ==========================
 # RISK GOVERNOR
@@ -76,7 +129,9 @@ MAX_POSITIONS_PER_SECTOR = 3
 
 # Maximum total open risk (sum of entry-to-stop distance
 # multiplied by quantity across open positions).
-MAX_PORTFOLIO_HEAT = 25000
+# Scales with equity: max 5% of equity at risk across
+# all open positions simultaneously.
+MAX_PORTFOLIO_HEAT = int(CAPITAL * 0.05)
 
 # ==========================
 # CONVICTION

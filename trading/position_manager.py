@@ -25,8 +25,11 @@ class PositionManager:
 
         risk_qty = int(risk_amount / risk_per_share)
 
-        available_capital = self.capital_manager.available()
-        capital_qty = int(available_capital / entry_price)
+        # Quantity affordable given FREE MARGIN (buying
+        # power = free equity × leverage), matching how
+        # an MIS account actually gates size.
+        buying_power = self.capital_manager.buying_power()
+        capital_qty = int(buying_power / entry_price)
 
         max_trade_qty = int(MAX_CAPITAL_PER_TRADE / entry_price)
 

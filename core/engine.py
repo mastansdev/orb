@@ -239,6 +239,27 @@ class Engine:
             telegram=self.telegram
         )
 
+        # Capital profile banner — makes the active
+        # account size and leverage impossible to miss.
+        from config import (
+            CAPITAL_PROFILE,
+            CAPITAL,
+            MIS_LEVERAGE,
+            BUYING_POWER,
+            MAX_CAPITAL_PER_TRADE,
+            TRADING_MODE,
+        )
+        print("\n" + "=" * 60)
+        print(f"  CAPITAL PROFILE : {CAPITAL_PROFILE}  "
+              f"({TRADING_MODE} mode)")
+        print("=" * 60)
+        print(f"  Equity        : ₹{CAPITAL:,.0f}")
+        print(f"  Leverage      : {MIS_LEVERAGE}× (MIS)")
+        print(f"  Buying Power  : ₹{BUYING_POWER:,.0f}")
+        print(f"  Max per trade : ₹{MAX_CAPITAL_PER_TRADE:,.0f} "
+              f"(value)")
+        print("=" * 60 + "\n")
+
         # Config coherence audit at every startup —
         # incoherent limits are found on the bench,
         # not live.
@@ -1703,6 +1724,43 @@ class Engine:
 
     def causal_report(self, symbol=None):
         return self.causal_engine.report(symbol)
+
+    # --------------------------------------------------
+
+    def profile_report(self):
+        from config import (
+            CAPITAL_PROFILE,
+            CAPITAL,
+            MIS_LEVERAGE,
+            BUYING_POWER,
+            MAX_CAPITAL_PER_TRADE,
+            RISK_PER_TRADE,
+            DAILY_MAX_LOSS,
+            DAILY_MAX_PROFIT,
+        )
+
+        cm = self.capital_manager
+
+        return (
+            "CAPITAL PROFILE\n\n"
+            f"Profile      : {CAPITAL_PROFILE}\n"
+            f"Equity       : ₹{CAPITAL:,.0f}\n"
+            f"Leverage     : {MIS_LEVERAGE}× (MIS)\n"
+            f"Buying Power : ₹{BUYING_POWER:,.0f}\n\n"
+            f"Max / trade  : ₹{MAX_CAPITAL_PER_TRADE:,.0f} "
+            f"(value)\n"
+            f"Risk / trade : {RISK_PER_TRADE:.0%} = "
+            f"₹{CAPITAL * RISK_PER_TRADE:,.0f}\n"
+            f"Day Max Loss : ₹{DAILY_MAX_LOSS:,.0f}\n"
+            f"Day Max Prof : ₹{DAILY_MAX_PROFIT:,.0f}\n\n"
+            f"LIVE NOW:\n"
+            f"Free Margin  : ₹{cm.available():,.0f}\n"
+            f"Margin Used  : ₹{cm.blocked():,.0f}\n"
+            f"Exposure     : ₹{cm.exposure():,.0f}\n\n"
+            f"To change: set CAPITAL_PROFILE in config.py\n"
+            f"(30K 50K 1L 2L 5L 10L 20L 30L 50L 1CR) "
+            f"and restart."
+        )
 
     # --------------------------------------------------
 
