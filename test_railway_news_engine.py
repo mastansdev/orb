@@ -1,13 +1,17 @@
 from railway_news_engine import RailwayNewsEngine
+import time
 
 engine = RailwayNewsEngine()
 
 print("=" * 80)
-print("STARTING RAILWAY TEST")
+print("FIRST POLL")
 print("=" * 80)
+engine.run()
 
-stats = engine.run()
+print("\nWaiting 10 seconds...\n")
+time.sleep(10)
 
-print()
-print("Returned Statistics")
-print(stats)
+print("=" * 80)
+print("SECOND POLL")
+print("=" * 80)
+engine.run()

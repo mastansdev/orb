@@ -1,0 +1,37 @@
+SRC,DST,TYPE,WEIGHT
+# Curated economic edges — REVIEW BEFORE TRUSTING.
+# Format: SRC,DST,TYPE,WEIGHT  (weight 0-1 = materiality)
+# Types: supplier_of / customer_of / subsidiary_of / competitor_of
+# supplier_of: SRC supplies to DST (order win at DST lifts SRC)
+# These starter rows are broad public knowledge with
+# conservative weights — verify and extend from annual
+# reports (customer concentration disclosures).
+MOTHERSON,MARUTI,supplier_of,0.3
+BOSCHLTD,MARUTI,supplier_of,0.2
+BEL,HAL,supplier_of,0.2
+ASTRAMICRO,BEL,supplier_of,0.4
+DATAPATTNS,BEL,supplier_of,0.3
+MTARTECH,HAL,supplier_of,0.3
+HAL,BEL,competitor_of,0.2
+BDL,BEL,competitor_of,0.3
+LTTS,LT,subsidiary_of,0.6
+LTIM,LT,subsidiary_of,0.6
+LTF,LT,subsidiary_of,0.5
+TATAMOTORS,TATASTEEL,customer_of,0.15
+JSWSTEEL,TATASTEEL,competitor_of,0.5
+SAIL,TATASTEEL,competitor_of,0.4
+HINDALCO,VEDL,competitor_of,0.4
+TCS,INFY,competitor_of,0.6
+INFY,WIPRO,competitor_of,0.5
+HCLTECH,TCS,competitor_of,0.5
+SUNPHARMA,CIPLA,competitor_of,0.4
+DRREDDY,SUNPHARMA,competitor_of,0.4
+MARUTI,TATAMOTORS,competitor_of,0.4
+M&M,MARUTI,competitor_of,0.4
+HDFCBANK,ICICIBANK,competitor_of,0.6
+KOTAKBANK,HDFCBANK,competitor_of,0.5
+SBIN,BANKBARODA,competitor_of,0.4
+ULTRACEMCO,AMBUJACEM,competitor_of,0.5
+SHREECEM,ULTRACEMCO,competitor_of,0.4
+ADANIPORTS,CONCOR,competitor_of,0.2
+IRCTC,INDIGO,competitor_of,0.1

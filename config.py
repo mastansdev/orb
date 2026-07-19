@@ -23,7 +23,7 @@ FIXED_RISK = 1000            #  Used when RISK_MODE = "FIXED"
 
 MAX_CAPITAL_PER_TRADE = 100000
 
-MAX_OPEN_POSITIONS = 100
+MAX_OPEN_POSITIONS = 25
 
 
 # ==========================
@@ -38,7 +38,7 @@ LIVE_CAPITAL = 10000000
 # STRATEGY
 # ==========================
 MIN_PRICE = 200
-ENTRY_BUFFER = 1.0
+ENTRY_BUFFER_PCT = 0.1   # 0.1% above ORB high — replaces old flat-rupee ENTRY_BUFFER
 ORB_BUFFER = 2.0
 MAX_BREAKOUT_PERCENT = 1.0
 RISK_REWARD = 1.0
@@ -52,6 +52,72 @@ MIN_ORB_RANGE_PERCENT = 1.0
 # ==========================
 DAILY_MAX_LOSS = 5000
 DAILY_MAX_PROFIT = 50000
+
+# ==========================
+# RISK GOVERNOR
+# ==========================
+
+# Master switch for the independent risk authority.
+RISK_GOVERNOR_ENABLED = True
+
+# Daily loss lockout uses DAILY_MAX_LOSS above.
+# Loss is measured as realized + floating MTM.
+DAILY_LOSS_INCLUDES_FLOATING = True
+
+# When the daily loss lockout fires, also exit all
+# open positions (not just block new entries).
+KILL_SWITCH_EXIT_ALL = True
+
+# Pause new entries after N consecutive losing trades.
+MAX_CONSECUTIVE_LOSSES = 4
+
+# Maximum simultaneous open positions in one sector.
+MAX_POSITIONS_PER_SECTOR = 3
+
+# Maximum total open risk (sum of entry-to-stop distance
+# multiplied by quantity across open positions).
+MAX_PORTFOLIO_HEAT = 25000
+
+# ==========================
+# CONVICTION
+# ==========================
+
+# Minimum conviction score (0-100) required before the
+# Brain may approve capital allocation.
+CONVICTION_MIN_SCORE = 55
+
+# Conviction grade boundaries
+CONVICTION_GRADE_A_PLUS = 85
+CONVICTION_GRADE_A = 70
+CONVICTION_GRADE_B = 55
+
+# ==========================
+# DYNAMIC TRADE MANAGEMENT
+# ==========================
+
+DYNAMIC_MANAGEMENT_ENABLED = True
+
+# Book a fraction of the position at this R-multiple
+PARTIAL_BOOK_AT_R = 1.0
+PARTIAL_BOOK_FRACTION = 0.5
+
+# After this R-multiple, ratchet the trail to
+# highest_price - TRAIL_DISTANCE_R * risk
+TRAIL_AFTER_R = 1.5
+TRAIL_DISTANCE_R = 0.75
+
+# Block new entries on stocks with results today
+RESULTS_DAY_BLOCK = True
+
+# ==========================
+# MEMORY / PATTERNS
+# ==========================
+
+MEMORY_DB_FILE = "institutional_memory.db"
+
+# A symbol that fails this many ORB breakouts today is
+# penalized by the Pattern Engine.
+MAX_ORB_FAILURES_PER_DAY = 2
 
 # ==========================
 # ORDER
@@ -112,7 +178,7 @@ SEND_DAILY_REPORT = True
 
 DATA_FOLDER = "data"
 
-TRADE_LOG_FILE = "trade_log.csv"
+TRADE_LOG_FILE = "trade_log_v2.csv"
 
 UNIVERSE_FILE = "data/universe.csv"
 

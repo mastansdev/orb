@@ -16,16 +16,19 @@ Dhan Order
 Return Response
 """
 
+import time
 import traceback
 from datetime import datetime
 
 from config import (
     PRODUCT_TYPE,
     ORDER_TYPE,
-    ENABLE_TELEGRAM_CONFIRMATION
+    ENABLE_TELEGRAM_CONFIRMATION,
+    ORDER_RETRY_COUNT,
 )
 
 from dhan_client import dhan
+from execution_quality import ExecutionQuality
 
 # Import your telegram notifier later
 # from telegram_notifier import send_message
@@ -34,6 +37,7 @@ from dhan_client import dhan
 class LiveExecution:
 
     def __init__(self):
+        self.execution_quality = ExecutionQuality()
         print("✓ Live Execution Engine Initialized")
 
     # ---------------------------------------------------------
@@ -127,16 +131,56 @@ class LiveExecution:
 
     # ---------------------------------------------------------
 
+    def _confirm_fill(self, order_id):
+        """
+        Post-placement confirmation: fetch the order and
+        read status + average traded price. Returns
+        (status, fill_price) — (None, None) on failure.
+        """
+        try:
+            detail = dhan.get_order_by_id(order_id)
+
+            data = (
+                detail.get("data")
+                if isinstance(detail, dict) else None
+            )
+
+            if isinstance(data, list) and data:
+                data = data[0]
+
+            if not isinstance(data, dict):
+                return None, None
+
+            status = data.get("orderStatus", "")
+
+            fill_price = (
+                data.get("averageTradedPrice")
+                or data.get("average_traded_price")
+                or data.get("tradedPrice")
+            )
+
+            return status, (
+                float(fill_price) if fill_price else None
+            )
+
+        except Exception:
+            return None, None
+
+    # ---------------------------------------------------------
+
     def _execute(
         self,
         transaction_type,
         side_label,
         security_id,
         symbol,
-        qty
+        qty,
+        price=0
     ):
         """
-        Consolidated order wrapper handling SDK handshakes and execution safety.
+        Consolidated order wrapper handling SDK
+        handshakes, retries, price mapping, fill
+        confirmation, and slippage capture.
         """
         try:
             self._validate_order(
@@ -145,19 +189,62 @@ class LiveExecution:
                 qty
             )
 
-            response = dhan.place_order(
-                security_id=str(security_id),
-                exchange_segment=dhan.NSE,
-                transaction_type=transaction_type,
-                quantity=int(qty),
-                order_type=self._get_order_type(),
-                product_type=self._get_product_type(),
-                # Note: Defaulting to 0 because MARKET orders ignore the supplied price.
-                # If LIMIT/STOP_LIMIT are supported later, map the price argument here.
-                price=0,
-                trigger_price=0,
-                validity="DAY"
-            )
+            order_type = self._get_order_type()
+
+            # Price mapping: MARKET ignores price;
+            # LIMIT uses it; STOP_LIMIT uses it as
+            # trigger + limit.
+            order_price = 0
+            trigger_price = 0
+
+            if order_type == dhan.LIMIT:
+                order_price = float(price or 0)
+            elif order_type == dhan.SL:
+                order_price = float(price or 0)
+                trigger_price = float(price or 0)
+
+            response = None
+            last_error = "Order not attempted."
+
+            for attempt in range(
+                1, max(1, ORDER_RETRY_COUNT) + 1
+            ):
+                try:
+                    response = dhan.place_order(
+                        security_id=str(security_id),
+                        exchange_segment=dhan.NSE,
+                        transaction_type=transaction_type,
+                        quantity=int(qty),
+                        order_type=order_type,
+                        product_type=self._get_product_type(),
+                        price=order_price,
+                        trigger_price=trigger_price,
+                        validity="DAY"
+                    )
+
+                    if (
+                        isinstance(response, dict)
+                        and response.get("status") == "success"
+                    ):
+                        break
+
+                    last_error = (
+                        response.get("remarks", "rejected")
+                        if isinstance(response, dict)
+                        else str(response)
+                    )
+
+                except Exception as e:
+                    last_error = str(e)
+                    response = None
+
+                if attempt < ORDER_RETRY_COUNT:
+                    print(
+                        f"[EXEC] Retry {attempt}/"
+                        f"{ORDER_RETRY_COUNT}: {symbol} "
+                        f"({str(last_error)[:80]})"
+                    )
+                    time.sleep(1)
 
             self._log_execution(
                 side_label,
@@ -169,17 +256,55 @@ class LiveExecution:
             if ENABLE_TELEGRAM_CONFIRMATION:
                 pass
 
-            # Broker accepted the order
-            if response.get("status") == "success":
+            if (
+                isinstance(response, dict)
+                and response.get("status") == "success"
+            ):
+                # ------------------------------------
+                # Fill confirmation + slippage capture
+                # ------------------------------------
+                order_id = ""
+                try:
+                    order_id = str(
+                        response.get("data", {}).get(
+                            "orderId", ""
+                        )
+                    )
+                except Exception:
+                    pass
+
+                fill_status, fill_price = (None, None)
+
+                if order_id:
+                    fill_status, fill_price = (
+                        self._confirm_fill(order_id)
+                    )
+
+                self.execution_quality.record(
+                    mode="LIVE",
+                    side=side_label,
+                    symbol=symbol,
+                    qty=qty,
+                    intended_price=float(price or 0),
+                    fill_price=fill_price,
+                    order_id=order_id,
+                    status=fill_status or "PLACED",
+                )
+
                 return self._success(response)
 
-            # Broker rejected the order
-            return self._failure(
-                response.get(
-                    "remarks",
-                    "Broker rejected order."
-                )
+            # All attempts failed
+            self.execution_quality.record(
+                mode="LIVE",
+                side=side_label,
+                symbol=symbol,
+                qty=qty,
+                intended_price=float(price or 0),
+                fill_price=None,
+                status=f"FAILED: {str(last_error)[:60]}",
             )
+
+            return self._failure(last_error)
 
         except Exception as e:
             traceback.print_exc()
@@ -201,7 +326,8 @@ class LiveExecution:
             side_label="BUY",
             security_id=security_id,
             symbol=symbol,
-            qty=qty
+            qty=qty,
+            price=price
         )
 
     # ---------------------------------------------------------
@@ -218,5 +344,6 @@ class LiveExecution:
             side_label="SELL",
             security_id=security_id,
             symbol=symbol,
-            qty=qty
+            qty=qty,
+            price=price
         )

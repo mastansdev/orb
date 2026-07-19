@@ -52,14 +52,16 @@ class TradeForensics:
                 if row["Date"] != trade_date:
                     continue
 
-                row["Entry"] = float(row["Entry"])
-                row["Exit"] = float(row["Exit"])
+                # 1. Map entry and exit prices using the new header naming
+                row["EntryPrice"] = float(row["EntryPrice"])
+                row["ExitPrice"] = float(row["ExitPrice"])
                 row["Qty"] = int(row["Qty"])
                 row["PnL"] = float(row["PnL"])
 
                 self.trades.append(row)
 
-        self.trades.sort(key=lambda x: x["Time"])
+        # 1. Sort using EntryTime instead of generic Time
+        self.trades.sort(key=lambda x: x["EntryTime"])
 
     # --------------------------------------------------
 
@@ -73,8 +75,9 @@ class TradeForensics:
             print("Status          : NO TRADES")
             return
 
-        first_trade = self.trades[0]["Time"]
-        last_trade = self.trades[-1]["Time"]
+        # 2. Extract first and last trade timings using EntryTime
+        first_trade = self.trades[0]["EntryTime"]
+        last_trade = self.trades[-1]["EntryTime"]
 
         print(f"First Trade     : {first_trade}")
         print(f"Last Trade      : {last_trade}")
@@ -185,8 +188,9 @@ class TradeForensics:
 
         exit_analysis = {}
 
+        # 3. Pull from ExitReason instead of Reason
         for trade in self.trades:
-            reason = trade["Reason"]
+            reason = trade["ExitReason"]
             exit_analysis[reason] = (
                 exit_analysis.get(reason, 0) + 1
             )
@@ -244,8 +248,9 @@ class TradeForensics:
             "14:00-15:15": []
         }
 
+        # 4. Use EntryTime to slot trades into their corresponding hours
         for trade in self.trades:
-            hour, minute, _ = map(int, trade["Time"].split(":"))
+            hour, minute, _ = map(int, trade["EntryTime"].split(":"))
 
             if hour == 9 and minute < 45:
                 slots["09:30-09:45"].append(trade)

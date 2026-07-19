@@ -28,11 +28,24 @@ Market Intelligence pipeline.
 from copy import deepcopy
 from datetime import datetime
 from news_models import ImpactResult
+from repositories.memory_repository import MemoryRepository
 
 
 class MarketMemory:
 
-    def __init__(self):
+    def __init__(self, repository=None):
+        # Persistent memory (survives restarts).
+        # Falls back to in-memory-only mode if the
+        # local database cannot be opened.
+        if repository is not None:
+            self.repository = repository
+        else:
+            try:
+                self.repository = MemoryRepository()
+            except Exception as e:
+                print(f"[MEMORY] Persistence unavailable: {e}")
+                self.repository = None
+
         self.reset()
 
     # --------------------------------------------------
@@ -78,7 +91,131 @@ class MarketMemory:
         self._active[rule] = event
         self._remembered += 1
 
+        # ---------------------------------
+        # Persist to institutional memory
+        # ---------------------------------
+        if self.repository is not None:
+            try:
+                self.repository.save_market_event(event)
+            except Exception as e:
+                print(f"[MEMORY] Persist failed: {e}")
+
         return True
+
+    # --------------------------------------------------
+    # Historical Recall
+    # --------------------------------------------------
+
+    def similar_events(self, rule, limit=20):
+        """
+        'This catalyst has occurred before — what happened?'
+        Returns previous occurrences of the same rule from
+        persistent memory.
+        """
+        if self.repository is None:
+            return []
+
+        try:
+            return self.repository.similar_market_events(
+                rule,
+                limit
+            )
+        except Exception:
+            return []
+
+    # --------------------------------------------------
+    # ORB Outcome Memory
+    # --------------------------------------------------
+
+    def record_orb_outcome(self, symbol, sector, outcome, pnl=0.0):
+        """
+        outcome: 'SUCCESS' (target) or 'FAILED' (stoploss)
+        """
+        if self.repository is None:
+            return
+
+        try:
+            self.repository.save_orb_outcome(
+                symbol,
+                sector,
+                outcome,
+                pnl
+            )
+        except Exception as e:
+            print(f"[MEMORY] ORB outcome persist failed: {e}")
+
+    # --------------------------------------------------
+
+    def orb_failures_today(self, symbol):
+        if self.repository is None:
+            return 0
+
+        try:
+            return self.repository.orb_failures_today(symbol)
+        except Exception:
+            return 0
+
+    # --------------------------------------------------
+
+    def orb_stats(self, symbol):
+        if self.repository is None:
+            return {"symbol": symbol, "samples": 0}
+
+        try:
+            return self.repository.orb_stats(symbol)
+        except Exception:
+            return {"symbol": symbol, "samples": 0}
+
+    # --------------------------------------------------
+    # Trade Outcome Memory
+    # --------------------------------------------------
+
+    def record_trade_outcome(self, trade):
+        if self.repository is None:
+            return
+
+        try:
+            self.repository.save_trade_outcome(trade)
+        except Exception as e:
+            print(f"[MEMORY] Trade outcome persist failed: {e}")
+
+    # --------------------------------------------------
+
+    def symbol_trade_stats(self, symbol):
+        if self.repository is None:
+            return {"symbol": symbol, "trades": 0}
+
+        try:
+            return self.repository.symbol_trade_stats(symbol)
+        except Exception:
+            return {"symbol": symbol, "trades": 0}
+
+    # --------------------------------------------------
+    # Sector Leadership Memory
+    # --------------------------------------------------
+
+    def record_sector_day(self, sector, rank, score):
+        if self.repository is None:
+            return
+
+        try:
+            self.repository.save_sector_day(sector, rank, score)
+        except Exception:
+            pass
+
+    # --------------------------------------------------
+
+    def sector_leadership_streak(self, sector, top_n=3):
+        if self.repository is None:
+            return 0
+
+        try:
+            return self.repository.sector_leadership_streak(
+                sector,
+                top_n
+            )
+        except Exception:
+            return 0
 
     # --------------------------------------------------
     # Forget

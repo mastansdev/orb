@@ -6,7 +6,8 @@ from telegram_notifier import TelegramNotifier
 from position_recovery import PositionRecovery
 from open_position_manager import OpenPositionManager
 from trade_selection_engine import TradeSelectionEngine
-from config import ORB_BUFFER, ENTRY_BUFFER
+import traceback
+from config import ORB_BUFFER
 from portfolio_risk_manager import PortfolioOpportunity
 from trade_policy_manager import TradePolicyManager
 
@@ -36,6 +37,11 @@ from config import DECISION_TRACE
 from system_registry import SystemRegistry
 from intelligence_engine import IntelligenceEngine
 from portfolio_risk_manager import PortfolioRiskManager
+from allocation_trigger_engine import AllocationTriggerEngine
+from capital_allocation_engine import CapitalAllocationEngine
+from opportunity_ranker import OpportunityRanker
+from portfolio_intelligence_engine import PortfolioIntelligenceEngine
+
 from decision_audit import DecisionAudit
 
 # Portfolio Control
@@ -52,6 +58,17 @@ from market_catalyst import MarketCatalyst
 from market_memory import MarketMemory
 from market_environment import MarketEnvironment
 from news_engine import NewsEngine
+
+# Institutional Risk & Memory Intelligence
+from risk_governor import RiskGovernor
+from pattern_engine import PatternEngine
+from company_intelligence import CompanyIntelligence
+from event_intelligence import EventIntelligence
+from fno_opportunity_engine import FnOOpportunityEngine
+from knowledge_graph import KnowledgeGraph
+from results_calendar import ResultsCalendar
+from dynamic_trade_manager import DynamicTradeManager
+from causal_reasoning_engine import CausalReasoningEngine
 
 from intelligence_context import IntelligenceContext
 
@@ -73,6 +90,24 @@ class Engine:
         self.historical_data = HistoricalData()
         self.capital_manager = CapitalManager()
         self.trade_selection_engine = TradeSelectionEngine()
+
+        # --------------------------------------------------
+        # Institutional Capital Allocation Layer
+        # --------------------------------------------------
+
+        self.opportunity_ranker = OpportunityRanker()
+        self.portfolio_intelligence_engine = PortfolioIntelligenceEngine()
+
+        # --------------------------------------------------
+        # Institutional Capital Allocation Layer
+        # --------------------------------------------------
+
+        self.opportunity_ranker = OpportunityRanker()
+        self.portfolio_intelligence_engine = PortfolioIntelligenceEngine()
+        self.capital_allocation_engine = CapitalAllocationEngine()
+        self.allocation_trigger_engine = AllocationTriggerEngine()
+
+
         self.sector_engine = SectorEngine()
         self.industry_engine = IndustryEngine()
         self.results_engine = ResultsEngine()
@@ -106,12 +141,23 @@ class Engine:
         self.news_engine = NewsEngine(self.intelligence_context)
         self.news_collector = NewsRSSCollector()
         self.bse_corporate_collector = BSECorporateCollector()
-        
+
         # Register News Sources
         self.news_engine.register_collector(self.news_collector)
         self.news_engine.register_collector(
             self.bse_corporate_collector
         )
+
+        # Regulatory carriers (SEBI / RBI / PIB)
+        try:
+            from collectors.regulatory_collector import (
+                RegulatoryCollector,
+            )
+            self.news_engine.register_collector(
+                RegulatoryCollector()
+            )
+        except Exception as e:
+            print(f"[NEWS] Regulatory collector unavailable: {e}")
 
         
         # Legacy components retained temporarily during migration.
@@ -142,6 +188,15 @@ class Engine:
         self.broker_sync = BrokerSync()
         self.risk_manager = RiskManager()
         self.portfolio_risk_manager = PortfolioRiskManager()
+        self.allocation_trigger_engine = AllocationTriggerEngine()
+        self.capital_allocation_engine = CapitalAllocationEngine()
+        # ---------------------------------
+        # Institutional Allocation Clock
+        # ---------------------------------
+        
+        self.last_allocation_cycle = None
+
+
         self.trade_policy_manager = TradePolicyManager()
         self.decision_audit = DecisionAudit()
         self.portfolio_ledger = PortfolioLedger()
@@ -164,8 +219,90 @@ class Engine:
             os.getenv("TELEGRAM_BOT_TOKEN"),
             os.getenv("TELEGRAM_CHAT_ID")
         )
+
+        # --------------------------------------------------
+        # Risk Governor — independent risk authority.
+        # Evidence contributes; Conviction decides;
+        # RISK AUTHORIZES; Execution acts.
+        # --------------------------------------------------
+        self.risk_governor = RiskGovernor(
+            capital_manager=self.capital_manager,
+            trade_controller=self.trade_controller,
+            telegram=self.telegram
+        )
+
+        # Config coherence audit at every startup —
+        # incoherent limits are found on the bench,
+        # not live.
+        self.risk_governor.print_coherence_audit()
+
+        # --------------------------------------------------
+        # Memory-Driven Intelligence
+        # --------------------------------------------------
+        self.company_intelligence = CompanyIntelligence()
+        self.pattern_engine = PatternEngine(self.market_memory)
+
+        # Event Intelligence : stories → structured,
+        # permanent, per-stock events
+        self.event_intelligence = EventIntelligence(
+            repository=self.market_memory.repository,
+            company_intelligence=self.company_intelligence
+        )
+
+        # F&O Opportunity Intelligence : live catalyst
+        # watchlist over the F&O universe
+        self.fno_opportunity_engine = FnOOpportunityEngine(
+            company_intelligence=self.company_intelligence,
+            repository=self.market_memory.repository
+        )
+
+        # Knowledge Graph : weighted relationships +
+        # sympathy propagation
+        self.knowledge_graph = KnowledgeGraph(
+            company_intelligence=self.company_intelligence,
+            repository=self.market_memory.repository
+        )
+
+        # Results Calendar : no new risk into binary events
+        self.results_calendar = ResultsCalendar(
+            repository=self.market_memory.repository
+        )
+
+        # Calendar Harvester : auto-populate the
+        # calendar from board-meeting intimations
+        from calendar_harvester import CalendarHarvester
+        self.calendar_harvester = CalendarHarvester(
+            self.results_calendar
+        )
+
+        # Dynamic Trade Manager : partial booking,
+        # ratchet trailing, catalyst exits
+        self.dynamic_trade_manager = DynamicTradeManager(
+            event_intelligence=self.event_intelligence,
+            fno_engine=self.fno_opportunity_engine
+        )
+
+        # Causal Reasoning Engine : institutional
+        # cause-and-effect knowledge (1st/2nd/3rd order)
+        self.causal_engine = CausalReasoningEngine(
+            company_intelligence=self.company_intelligence,
+            repository=self.market_memory.repository
+        )
+
+        self.trade_selection_engine.attach_intelligence(
+            pattern_engine=self.pattern_engine,
+            company_intelligence=self.company_intelligence,
+            event_intelligence=self.event_intelligence,
+            fno_engine=self.fno_opportunity_engine,
+            knowledge_graph=self.knowledge_graph,
+            results_calendar=self.results_calendar,
+            calendar_harvester=self.calendar_harvester,
+            causal_engine=self.causal_engine
+        )
         self.summary_printed = False
         self.last_sector_print = ""
+        # Rolling tick-error tracking (for Phase 0 exception handling)
+        self._tick_error_timestamps = []
         self.market_recorder = MarketRecorder(interval_seconds=1)
 
         self.trades = self.position_recovery.load()
@@ -284,44 +421,49 @@ class Engine:
             if self.execution.mode == "LIVE":
 
                 if trade is not None:
-                    
+
                     if not self.broker_sync.has_position(security_id):
 
                         print(f"⚠ Manual Exit Detected : {symbol}")
 
-                    # Remove internal tracking states
-                    self.position_manager.remove_position(security_id)
-                    self.open_position_manager.remove(security_id)
+                        # Remove internal tracking states
+                        self.position_manager.remove_position(security_id)
+                        self.open_position_manager.remove(security_id)
 
-                    # Free risk allocation capacity
-                    self.portfolio_risk_manager.remove_trade(symbol)
+                        # Free risk allocation capacity
+                        self.portfolio_risk_manager.remove_trade(symbol)
 
-                    # Update portfolio ledger state before dropping the dict handle
-                    capital_released = trade["qty"] * ltp
-                    self.portfolio_ledger.record_sell(
-                        capital_released=capital_released,
-                        gross_pnl=0
-                    )
+                        # Update portfolio ledger state before dropping the dict handle
+                        capital_released = trade["qty"] * ltp
+                        self.portfolio_ledger.record_sell(
+                            capital_released=capital_released,
+                            gross_pnl=0
+                        )
 
-                    # Clear recovery state maps safely
-                    del self.trades[security_id]
-                    if self.trades:
-                        self.position_recovery.save(self.trades)
-                    else:
-                        self.position_recovery.clear()
+                        # Clear recovery state maps safely
+                        del self.trades[security_id]
+                        if self.trades:
+                            self.position_recovery.save(self.trades)
+                        else:
+                            self.position_recovery.clear()
 
-                    # Update visual dashboard states
-                    self.monitor.decrement("active_trades")
-                    self.monitor.set_last_trade(f"MANUAL EXIT {symbol}")
+                        # Update visual dashboard states
+                        self.monitor.decrement("active_trades")
+                        self.monitor.set_last_trade(f"MANUAL EXIT {symbol}")
 
-                    # Dispatch notifications
-                    self.telegram.send(
-                        f"⚠️ MANUAL EXIT DETECTED\n\n"
-                        f"Stock : {symbol}\n\n"
-                        f"The position was closed outside the bot.\n"
-                        f"Internal state synchronized successfully."
-                    )
-                    return
+                        # Dispatch notifications
+                        self.telegram.send(
+                            f"⚠️ MANUAL EXIT DETECTED\n\n"
+                            f"Stock : {symbol}\n\n"
+                            f"The position was closed outside the bot.\n"
+                            f"Internal state synchronized successfully."
+                        )
+                        return
+                    # else: broker still shows this position open —
+                    # fall through to the normal entry/exit pipeline below
+                
+
+
 
             # ---------------------------------
             # POSITION ENTRY PIPELINE
@@ -332,7 +474,13 @@ class Engine:
                 if not self.trade_controller.is_entries_enabled():
                     return
 
-                signal = self.strategy.is_buy_signal(ltp, orb, ltt)
+                # Risk Governor kill-switch fast path:
+                # when locked, skip all evaluation work.
+                if self.risk_governor.locked:
+                    return
+
+                last_closed_candle = self.candle_engine.get_latest(symbol)
+                signal = self.strategy.is_buy_signal(orb, ltt, last_closed_candle)
 
                 if signal:
                     print("\n========== LIVE ORB CANDIDATE ==========")
@@ -424,17 +572,6 @@ class Engine:
 
                     self.monitor.increment("signals")
 
-                    if symbol in ("VTL", "NUVAMA"):
-                        trigger_price = orb["high"] + ENTRY_BUFFER
-                        print("\n========== BREAKOUT DEBUG ==========")
-                        print(f"Symbol        : {symbol}")
-                        print(f"Time          : {ltt}")
-                        print(f"ORB High      : {orb['high']:.2f}")
-                        print(f"Trigger Price : {trigger_price:.2f}")
-                        print(f"Current LTP   : {ltp:.2f}")
-                        print(f"Breakout %    : {((ltp - orb['high']) / orb['high']) * 100:.3f}%")
-                        print("====================================\n")
-
                     stop_loss = orb["low"] - ORB_BUFFER
 
                     qty = self.position_manager.open_position(
@@ -457,6 +594,47 @@ class Engine:
 
                         print(f"TRADE POLICY REJECTED : {policy.reason}")
 
+                        return
+
+                    # --------------------------------------------------
+                    # RISK AUTHORIZATION (final gate before execution)
+                    #
+                    # Daily loss lockout, consecutive-loss pause,
+                    # portfolio heat cap, sector concentration cap.
+                    # --------------------------------------------------
+
+                    opportunity_sector = ""
+                    try:
+                        opportunity_sector = getattr(
+                            getattr(brain.opportunity, "intelligence", None),
+                            "dominant_sector",
+                            ""
+                        ) or ""
+                    except Exception:
+                        pass
+
+                    new_risk = max(0.0, (ltp - stop_loss)) * qty
+
+                    risk_allowed, risk_reason = (
+                        self.risk_governor.entry_allowed(
+                            trades=self.trades,
+                            new_risk=new_risk,
+                            sector=opportunity_sector
+                        )
+                    )
+
+                    if not risk_allowed:
+                        print(f"🛑 RISK VETO : {symbol} — {risk_reason}")
+                        self.monitor.increment("portfolio_rejected")
+
+                        self.decision_audit.record_portfolio_decision(
+                            security_id=security_id,
+                            portfolio_decision={
+                                "action": "RISK_VETO",
+                                "allowed": False,
+                                "reason": risk_reason
+                            }
+                        )
                         return
 
                     execution_result = self.execution.buy(security_id, symbol, ltp, qty)
@@ -504,6 +682,45 @@ class Engine:
                     new_trade["orb"] = {"high": orb["high"], "low": orb["low"]}
                     new_trade["decision"] = decision
 
+                    # --------------------------------------------------
+                    # Institutional Trade Context
+                    # --------------------------------------------------
+
+                    # Bug fix: sector/industry/theme live on the
+                    # opportunity's INTELLIGENCE snapshot, and
+                    # conviction lives on the opportunity itself.
+                    # The old getattr calls always returned "".
+
+                    opportunity_intelligence = getattr(
+                        brain.opportunity,
+                        "intelligence",
+                        None
+                    )
+
+                    new_trade["sector"] = getattr(
+                        opportunity_intelligence,
+                        "dominant_sector",
+                        ""
+                    ) or ""
+
+                    new_trade["industry"] = getattr(
+                        opportunity_intelligence,
+                        "dominant_industry",
+                        ""
+                    ) or ""
+
+                    new_trade["theme"] = getattr(
+                        opportunity_intelligence,
+                        "dominant_theme",
+                        ""
+                    ) or ""
+
+                    new_trade["conviction"] = getattr(
+                        brain.opportunity,
+                        "conviction",
+                        0
+                    )
+
                     self.decision_audit.record_execution(
                         security_id=security_id,
                         execution={
@@ -540,6 +757,81 @@ class Engine:
                     result = self.EXIT_MANUAL
                 else:
                     result = self.risk_manager.update(trade, ltp, ltt)
+
+                # --------------------------------------------------
+                # Dynamic Trade Management
+                # (partial booking / trail ratchet / catalyst exit)
+                # --------------------------------------------------
+                if result == "ACTIVE":
+                    try:
+                        advice = self.dynamic_trade_manager.advise(
+                            symbol, trade, ltp
+                        )
+
+                        if advice["action"] == "EXIT":
+                            print(
+                                f"⚡ CATALYST EXIT : {symbol} — "
+                                f"{advice['reason']}"
+                            )
+                            result = self.EXIT_SYSTEM
+
+                        elif advice["action"] == "TIGHTEN":
+                            trade["trail_sl"] = advice["new_trail"]
+                            trade["trail_active"] = True
+                            print(
+                                f"🔒 TRAIL RATCHET : {symbol} — "
+                                f"{advice['reason']}"
+                            )
+
+                        elif advice["action"] == "PARTIAL_BOOK":
+                            book_qty = advice["qty"]
+
+                            partial_result = self.execution.sell(
+                                security_id, symbol, ltp, book_qty
+                            )
+
+                            if partial_result["success"]:
+                                partial_pnl = (
+                                    (ltp - trade["entry"]) * book_qty
+                                )
+
+                                self.position_manager.reduce_position(
+                                    security_id, book_qty, ltp
+                                )
+
+                                self.portfolio_ledger.record_sell(
+                                    capital_released=book_qty * ltp,
+                                    gross_pnl=partial_pnl
+                                )
+
+                                trade["qty"] -= book_qty
+                                trade["partial_done"] = True
+                                trade["stage"] = "PARTIAL_BOOKED"
+
+                                self.position_recovery.save(
+                                    self.trades
+                                )
+
+                                print(
+                                    f"💰 PARTIAL BOOK : {symbol} "
+                                    f"{book_qty} @ {ltp:.2f} "
+                                    f"(₹{partial_pnl:.0f})"
+                                )
+
+                                self.telegram.send(
+                                    f"💰 PARTIAL PROFIT BOOKED\n\n"
+                                    f"Stock    : {symbol}\n"
+                                    f"Booked   : {book_qty} @ "
+                                    f"₹{ltp:.2f}\n"
+                                    f"PnL      : ₹{partial_pnl:.2f}\n"
+                                    f"Running  : {trade['qty']} left\n"
+                                    f"Reason   : {advice['reason']}"
+                                )
+
+                    except Exception as dyn_error:
+                        # Dynamic management must never
+                        # break the hard exit path
+                        print(f"[DYNAMIC] {dyn_error}")
 
                 if result == self.EXIT_TARGET:
                     self.monitor.increment("target")
@@ -608,17 +900,77 @@ class Engine:
                     self.monitor.set_last_trade(f"SELL {symbol} @ {ltp}")
                     
                     self.trade_logger.log_trade(
-                        trade["entry_date"],
-                        trade["entry_time"],
-                        datetime.now().strftime("%Y-%m-%d"),
-                        ltt,
-                        symbol,
-                        trade["entry"],
-                        ltp,
-                        trade["qty"],
-                        round(pnl, 2),
-                        result
+                        trade_date=trade["entry_date"],
+                        entry_time=trade["entry_time"],
+                        exit_time=ltt,
+                        symbol=symbol,
+
+                        sector=trade.get("sector", ""),
+                        industry=trade.get("industry", ""),
+                        theme=trade.get("theme", ""),
+                        qty=trade["qty"],
+
+                        entry_price=trade["entry"],
+                        exit_price=ltp,
+                        
+                        pnl=round(pnl, 2),
+
+                        exit_reason=result,
+
+                        conviction=trade.get("conviction", 0),
                     )
+
+                    # --------------------------------------------------
+                    # Institutional Memory : record the outcome
+                    # --------------------------------------------------
+
+                    try:
+                        # Risk Governor learns the result
+                        # (loss streaks, daily lockout re-check)
+                        self.risk_governor.on_trade_closed(pnl)
+
+                        trade_sector = trade.get("sector", "")
+
+                        # ORB outcome memory (repeated-failure
+                        # pattern detection feeds on this)
+                        if result == self.EXIT_TARGET:
+                            orb_outcome = "SUCCESS"
+                        elif result == self.EXIT_STOPLOSS:
+                            orb_outcome = "FAILED"
+                        else:
+                            orb_outcome = result
+
+                        self.market_memory.record_orb_outcome(
+                            symbol=symbol,
+                            sector=trade_sector,
+                            outcome=orb_outcome,
+                            pnl=round(pnl, 2)
+                        )
+
+                        # Trade outcome memory
+                        self.market_memory.record_trade_outcome({
+                            "trade_date": trade.get("entry_date", ""),
+                            "symbol": symbol,
+                            "sector": trade_sector,
+                            "industry": trade.get("industry", ""),
+                            "theme": trade.get("theme", ""),
+                            "entry_time": trade.get("entry_time", ""),
+                            "exit_time": ltt,
+                            "exit_reason": result,
+                            "conviction": trade.get("conviction", 0),
+                            "pnl": round(pnl, 2),
+                        })
+
+                        # Permanent company history
+                        self.company_intelligence.record_trade(
+                            symbol=symbol,
+                            exit_reason=result,
+                            pnl=pnl
+                        )
+
+                    except Exception as memory_error:
+                        # Memory failures must never block exits
+                        print(f"[MEMORY] Recording failed: {memory_error}")
 
                     self.position_manager.close_position(security_id, pnl)
                     self.open_position_manager.remove(security_id)
@@ -636,6 +988,33 @@ class Engine:
                             "All open positions have been successfully closed.\n\n"
                             "Remaining Positions : 0"
                         )
+
+        except Exception as e:
+            print(f"\n❌ TICK PROCESSING ERROR — {symbol} @ {ltt}")
+            print(f"Error: {e}")
+            traceback.print_exc()
+
+            now = datetime.now()
+            self._tick_error_timestamps.append(now)
+            # Keep only errors from the last 60 seconds
+            self._tick_error_timestamps = [
+                t for t in self._tick_error_timestamps
+                if (now - t).total_seconds() <= 60
+            ]
+
+            # Alert only if errors are clustering (5+ in the last minute),
+            # not on every isolated bad tick — avoids alert spam on normal
+            # noisy/malformed ticks while still catching real systemic issues
+            if len(self._tick_error_timestamps) >= 5:
+                try:
+                    self.telegram.send(
+                        f"⚠️ REPEATED TICK ERRORS\n\n"
+                        f"5+ errors in the last minute — possible systemic issue.\n"
+                        f"Latest: {symbol} — {str(e)[:150]}"
+                    )
+                except Exception:
+                    # Never let a Telegram failure cause a further crash
+                    pass
 
         finally:
             self.market_recorder.record(**self.system_snapshot())
@@ -700,8 +1079,55 @@ class Engine:
             "capital_used": capital["starting"] - capital["available"],
             "available_capital": capital["available"]
         }
+    
+    def run_capital_allocation_cycle(self):
+        """
+        Institutional Capital Allocation Pipeline
+        """
+
+        # --------------------------------------------------
+        #  1. Read Opportunity Pool
+        # --------------------------------------------------
+
+        opportunities = (
+            self.trade_selection_engine
+                    .opportunity_pool
+                    .ranked()
+        )
+        
+        if not opportunities:
+            return
+        
+        
+        print("\n" + "=" * 70)
+        print("         CAPITAL ALLOCATION CYCLE")
+        print("=" * 70)
+        
+        
+        print(f"Qualified Opportunities : {len(opportunities)}")
+
+        # --------------------------------------------------
+        # Temporary Debug Output
+        # --------------------------------------------------
+
+        for i, opportunity in enumerate(opportunities[:10], start=1):
+            
+            
+            symbol = getattr(opportunity, "symbol", "UNKNOWN")
+            conviction = getattr(opportunity, "conviction", 0)
+
+            print(
+                f"{i:02d}. "
+                f"{symbol:<15} "
+                f"Conviction : {conviction}"
+            )
+
+            print("=" * 70)
+
 
     def shutdown(self):
+        # Persist today's sector leadership before closing
+        self.record_sector_memory()
         self.market_recorder.close()
 
     def pause(self):
@@ -731,6 +1157,445 @@ class Engine:
 
     def trade_controller_status(self):
         return self.trade_controller.status()
+
+    # --------------------------------------------------
+    # Institutional Intelligence Accessors
+    # (used by the Telegram Command Center)
+    # --------------------------------------------------
+
+    def risk_status(self):
+        status = self.risk_governor.status()
+        status["portfolio_heat"] = (
+            self.risk_governor.portfolio_heat(self.trades)
+        )
+        return status
+
+    def memory_report(self, symbol):
+        sector = ""
+        try:
+            profile = self.company_intelligence.get_profile(symbol)
+            sector = profile.get("sector", "")
+        except Exception:
+            pass
+
+        return self.pattern_engine.report(symbol, sector)
+
+    def company_report(self, symbol):
+        return self.company_intelligence.report(symbol)
+
+    def opportunity_pool_report(self, limit=10):
+        opportunities = (
+            self.trade_selection_engine
+                .opportunity_pool
+                .ranked()
+        )
+
+        if not opportunities:
+            return "OPPORTUNITY POOL\n\nEmpty."
+
+        lines = ["OPPORTUNITY POOL", ""]
+
+        for i, opportunity in enumerate(
+            opportunities[:limit], start=1
+        ):
+            symbol = getattr(opportunity, "symbol", "?")
+            conviction = getattr(opportunity, "conviction", 0)
+            lines.append(
+                f"{i:02d}. {symbol:<12} "
+                f"Conviction {conviction:.1f}"
+            )
+
+        return "\n".join(lines)
+
+    def exposure_report(self):
+        """
+        Portfolio-aware intelligence: what is the book
+        actually exposed to right now?
+        """
+        if not self.trades:
+            return "PORTFOLIO EXPOSURE\n\nNo open positions."
+
+        sectors = {}
+        themes = {}
+        total_value = 0.0
+        total_risk = 0.0
+
+        for trade in self.trades.values():
+            value = trade.get("entry", 0) * trade.get("qty", 0)
+            risk = max(
+                0.0,
+                trade.get("entry", 0) - trade.get("stop_loss", 0)
+            ) * trade.get("qty", 0)
+
+            total_value += value
+            total_risk += risk
+
+            sector = trade.get("sector", "") or "UNKNOWN"
+            theme = trade.get("theme", "") or "UNKNOWN"
+
+            sectors[sector] = sectors.get(sector, 0) + value
+            themes[theme] = themes.get(theme, 0) + value
+
+        lines = [
+            "PORTFOLIO EXPOSURE",
+            "",
+            f"Positions   : {len(self.trades)}",
+            f"Deployed    : ₹{total_value:,.0f}",
+            f"Open Risk   : ₹{total_risk:,.0f}",
+            "",
+            "By Sector:",
+        ]
+
+        for sector, value in sorted(
+            sectors.items(), key=lambda x: -x[1]
+        ):
+            pct = value / total_value * 100 if total_value else 0
+            flag = " ⚠️" if pct > 50 else ""
+            lines.append(
+                f"• {sector}: ₹{value:,.0f} ({pct:.0f}%){flag}"
+            )
+
+        lines.append("")
+        lines.append("By Theme:")
+
+        for theme, value in sorted(
+            themes.items(), key=lambda x: -x[1]
+        )[:5]:
+            pct = value / total_value * 100 if total_value else 0
+            lines.append(
+                f"• {theme}: ₹{value:,.0f} ({pct:.0f}%)"
+            )
+
+        return "\n".join(lines)
+
+    # --------------------------------------------------
+
+    def calibration_report(self):
+        """
+        Learning layer: does conviction MEAN anything?
+        Conviction band vs. realized win rate.
+        """
+        try:
+            report = (
+                self.market_memory
+                    .repository
+                    .calibration_report()
+            )
+        except Exception:
+            return "CALIBRATION\n\nMemory unavailable."
+
+        lines = [
+            "CONVICTION CALIBRATION",
+            "(band → trades, win rate, PnL)",
+            "",
+        ]
+
+        any_data = False
+
+        for band in report:
+            if band["trades"] == 0:
+                continue
+            any_data = True
+            lines.append(
+                f"• {band['band']:>6} : "
+                f"{band['trades']} trades, "
+                f"{band['win_rate']}% wins, "
+                f"₹{band['total_pnl']:,.0f}"
+            )
+
+        if not any_data:
+            lines.append(
+                "No graded trades yet — calibration "
+                "builds as trades close."
+            )
+        else:
+            lines += [
+                "",
+                "Higher bands should win more often.",
+                "If they don't, conviction is miscalibrated.",
+            ]
+
+        return "\n".join(lines)
+
+    # --------------------------------------------------
+
+    def events_report(self, symbol=None):
+        return self.event_intelligence.report(symbol)
+
+    # --------------------------------------------------
+
+    def fno_report(self):
+        return self.fno_opportunity_engine.report()
+
+    # --------------------------------------------------
+
+    def graph_report(self, symbol):
+        return self.knowledge_graph.report(symbol)
+
+    # --------------------------------------------------
+
+    def calendar_report(self):
+        return self.results_calendar.report()
+
+    # --------------------------------------------------
+
+    def calendar_add(self, symbol, date):
+        return self.results_calendar.add(symbol, date)
+
+    # --------------------------------------------------
+
+    def causal_report(self, symbol=None):
+        return self.causal_engine.report(symbol)
+
+    # --------------------------------------------------
+
+    def edge_report(self):
+        from edge_analyzer import EdgeAnalyzer
+        return EdgeAnalyzer().report()
+
+    # --------------------------------------------------
+
+    def execution_report(self):
+        from execution_quality import ExecutionQuality
+        summary = ExecutionQuality().summary()
+
+        if not summary:
+            return "EXECUTION QUALITY\n\nNo fills logged."
+
+        lines = [
+            "EXECUTION QUALITY",
+            "",
+            f"Fills logged : {summary['fills']}",
+            f"Graded       : {summary['graded']}",
+        ]
+
+        if summary.get("graded"):
+            lines += [
+                f"Avg slippage : "
+                f"{summary['avg_slippage_bps']} bps",
+                f"Worst        : "
+                f"{summary['worst_slippage_bps']} bps",
+                f"Total cost   : "
+                f"₹{summary['total_slippage_rupees']}",
+            ]
+
+        return "\n".join(lines)
+
+    # --------------------------------------------------
+
+    def journal_report(self):
+        """
+        Today's decision journal from the audit log.
+        """
+        audit = self.decision_audit.all()
+
+        if not audit:
+            return "DECISION JOURNAL\n\nNo decisions today."
+
+        executed = 0
+        rejected = 0
+        risk_vetoed = 0
+
+        lines_detail = []
+
+        for record in audit.values():
+            symbol = record.get("symbol", "?")
+            decision = record.get("decision") or {}
+            selected = (
+                decision.get("selected", False)
+                if isinstance(decision, dict) else False
+            )
+            portfolio = record.get("portfolio")
+            execution = record.get("execution")
+            result = record.get("result")
+
+            if execution:
+                executed += 1
+                status = "EXECUTED"
+                if result:
+                    status += (
+                        f" → {result.get('exit_reason', 'OPEN')}"
+                        f" ₹{result.get('pnl', 0)}"
+                    )
+            elif (
+                isinstance(portfolio, dict)
+                and portfolio.get("action") == "RISK_VETO"
+            ):
+                risk_vetoed += 1
+                status = "RISK VETO"
+            elif selected:
+                status = "SELECTED (not executed)"
+            else:
+                rejected += 1
+                status = "REJECTED"
+
+            lines_detail.append(f"• {symbol}: {status}")
+
+        lines = [
+            "DECISION JOURNAL (today)",
+            "",
+            f"Evaluated  : {len(audit)}",
+            f"Executed   : {executed}",
+            f"Rejected   : {rejected}",
+            f"Risk Vetos : {risk_vetoed}",
+            "",
+        ] + lines_detail[:15]
+
+        return "\n".join(lines)
+
+    # --------------------------------------------------
+
+    def eod_report(self):
+        """
+        End-of-day institutional summary.
+        """
+        capital = self.capital()
+        mtm = self.mtm()
+        ledger = self.ledger() or {}
+        risk = self.risk_status()
+
+        lines = [
+            "END OF DAY REPORT",
+            "",
+            f"Net PnL      : ₹{mtm['net']:,.2f}",
+            f"Realized     : ₹{mtm['realized']:,.2f}",
+            f"Floating     : ₹{mtm['floating']:,.2f}",
+            "",
+            f"Capital Used : ₹{capital['starting'] - capital['available']:,.0f}",
+            f"Available    : ₹{capital['available']:,.0f}",
+            "",
+            f"Trades Closed  : {risk['trades_closed']}",
+            f"Entries Blocked: {risk['entries_blocked']}",
+            f"Loss Streak    : {risk['consecutive_losses']}",
+            f"Kill Switch    : "
+            f"{'FIRED — ' + risk['lock_reason'] if risk['locked'] else 'not fired'}",
+        ]
+
+        # Persist sector leadership for streak memory
+        recorded = self.record_sector_memory()
+        lines.append("")
+        lines.append(
+            f"Sector memory updated ({recorded} sectors)."
+        )
+
+        # Event outcome write-back: grade today's
+        # structured events with realized day moves —
+        # this is what makes event memory predictive.
+        graded = self.event_intelligence.write_outcomes(
+            price_engine.get_change
+        )
+        lines.append(
+            f"Event outcomes graded: {graded}."
+        )
+
+        return "\n".join(lines)
+
+    # --------------------------------------------------
+
+    def morning_brief(self):
+        """
+        Institutional pre-market brief:
+        risk state, active catalysts, sector streaks,
+        F&O watchlist, opportunity pool.
+        """
+        lines = ["🌅 INSTITUTIONAL BRIEF", ""]
+
+        # Risk state
+        risk = self.risk_status()
+        lines.append(
+            f"Risk : "
+            f"{'🔒 LOCKED — ' + risk['lock_reason'] if risk['locked'] else '🟢 clear'}"
+            f" | Day PnL ₹{risk['day_pnl']:,.0f}"
+        )
+
+        # Active market catalysts (memory)
+        try:
+            active = self.market_memory.active_rules()
+            if active:
+                lines.append("")
+                lines.append(
+                    f"Active Catalysts ({len(active)}):"
+                )
+                for rule in active[:5]:
+                    lines.append(f"• {rule}")
+        except Exception:
+            pass
+
+        # Sector streaks
+        try:
+            streaks = (
+                self.market_memory
+                    .repository
+                    .top_sector_streaks()
+            )
+            if streaks:
+                lines.append("")
+                lines.append("Sector Leadership Streaks:")
+                for s in streaks[:5]:
+                    lines.append(
+                        f"• {s['sector']} — "
+                        f"{s['streak']} day(s) in top 3"
+                    )
+        except Exception:
+            pass
+
+        # F&O watchlist
+        watchlist = self.fno_opportunity_engine.get_watchlist()
+        if watchlist:
+            lines.append("")
+            lines.append(
+                f"F&O Catalyst Watchlist ({len(watchlist)}):"
+            )
+            for entry in watchlist[:5]:
+                lines.append(
+                    f"• {entry['symbol']} — "
+                    f"{entry.get('event_type', '?')} "
+                    f"(imp {entry['importance']:.0f})"
+                )
+        else:
+            lines.append("")
+            lines.append("F&O Watchlist : empty")
+
+        return "\n".join(lines)
+
+    # --------------------------------------------------
+
+    def record_sector_memory(self):
+        """
+        Persist today's sector leadership ranking into
+        institutional memory (leadership streak tracking).
+        """
+        try:
+            rankings = self.sector_engine.get_rankings() or []
+
+            for i, entry in enumerate(rankings, start=1):
+                if isinstance(entry, dict):
+                    sector = (
+                        entry.get("sector")
+                        or entry.get("name")
+                        or ""
+                    )
+                    score = (
+                        entry.get("score")
+                        or entry.get("participation")
+                        or 0
+                    )
+                else:
+                    sector = str(entry)
+                    score = 0
+
+                if sector:
+                    self.market_memory.record_sector_day(
+                        sector=sector,
+                        rank=i,
+                        score=score
+                    )
+
+            return len(rankings)
+
+        except Exception as e:
+            print(f"[MEMORY] Sector memory failed: {e}")
+            return 0
 
     # --------------------------------------------------
     # Legacy Market Intelligence Pipeline

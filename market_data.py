@@ -2,11 +2,11 @@ import os
 import threading
 import time
 import traceback
+import queue
 from datetime import datetime
 
 from dotenv import load_dotenv
 from dhanhq import DhanContext, MarketFeed
-from websockets.exceptions import ConnectionClosedError
 
 from watchlist import get_instruments
 from instrument_loader import InstrumentLoader
@@ -51,7 +51,6 @@ expected_ticks = {
     for item in instruments
 }
 
-# Extract security IDs for historical preloading
 security_ids = [
     str(item[1]) for item in instruments
 ]
@@ -66,10 +65,9 @@ event_logger.system(
     data={
         "universe": len(instruments),
         "paper_mode": True,
-        "version": "1.0"    
+        "version": "1.0"
     }
 )
-
 
 # --------------------------------------------------
 # HISTORICAL ORB SCHEDULER
@@ -120,82 +118,123 @@ telegram_thread.start()
 print("Telegram Command Center Started")
 
 # --------------------------------------------------
-# NEWS INTELLIGENCE SCHEDULER
+# NOTE: News collection now runs as its own independent
+# 24/7 service on Railway (railway_main.py + railway_news_engine.py),
+# so it has been intentionally removed from here. This process
+# is now purely focused on trading -- ticks, ORB, execution --
+# with no news-related background work competing for resources
+# during market hours.
 # --------------------------------------------------
-def news_scheduler():
-    """
-    Periodically collect and process market news.
 
-    Runs independently from the live trading
-    thread so news processing never blocks
-    tick handling.
-    """
+# --------------------------------------------------
+# TICK QUEUE + WORKER THREAD
+#
+# Root cause fix: the previous design called feed.get_data()
+# in a loop, which only kept the WebSocket's event loop alive
+# for the instant of receiving ONE tick, then let it go fully
+# idle until the next call. That idle time meant the server's
+# keepalive pings were often missed, causing frequent disconnects
+# -- worse under heavy tick load, exactly matching what was
+# being observed live.
+#
+# Fix: use the SDK's persistent run() mode (continuous event
+# loop, connection stays alive and responsive throughout) and
+# hand off each tick to a queue immediately. A separate worker
+# thread drains that queue and does the actual heavy processing
+# (engine.process_tick). This means tick processing time can
+# NEVER delay the WebSocket's ability to respond to keepalive
+# pings, regardless of how many stocks/engines are involved.
+# --------------------------------------------------
 
+tick_queue = queue.Queue()
+
+
+def tick_worker():
+    """
+    Consumes ticks from the queue and runs the actual engine
+    processing, completely decoupled from the WebSocket thread.
+    """
     while True:
-
         try:
+            tick = tick_queue.get()
 
-            print("[NEWS] Scheduler Wakeup")
+            if tick is None:
+                continue
 
-            collected = engine.news_engine.collect()
+            tick_type = tick.get("type")
 
-            print(f"[NEWS] Collected = {collected}")
+            # ---------------------------------
+            # Previous Close Messages
+            # ---------------------------------
+            if tick_type == "Previous Close":
 
-            if collected > 0:
+                security_id = str(tick["security_id"])
+                symbol = loader.get_symbol(security_id)
 
-                evidence = engine.news_engine.process()
-                
+                if symbol is not None:
+                    price_engine.set_previous_close(
+                        symbol,
+                        float(tick["prev_close"])
+                    )
 
-                print(
-                    f"[NEWS] Evidence = {len(evidence)}"
-                )
+                continue
 
-        except Exception as e:
+            # ---------------------------------
+            # Ignore everything except live ticks
+            # ---------------------------------
+            if tick_type != "Ticker Data":
+                continue
 
-             print("\n========== NEWS TRACEBACK ==========")
-             traceback.print_exc()
-             print("====================================\n")
+            security_id = str(tick["security_id"])
+            symbol = loader.get_symbol(security_id)
 
-        print("[NEWS] Scheduler Sleeping")
+            if symbol is None:
+                print(f"Unknown Security ID : {security_id}")
+                continue
 
-        time.sleep(60)
+            if expected_ticks.get(security_id) is False:
+                expected_ticks[security_id] = True
+
+            engine.process_tick(
+                security_id=security_id,
+                symbol=symbol,
+                ltp=float(tick["LTP"]),
+                ltt=tick["LTT"]
+            )
+
+        except Exception:
+            print("\n========== TICK WORKER ERROR ==========")
+            traceback.print_exc()
+            print("========================================\n")
+
 
 threading.Thread(
-    target=news_scheduler,
+    target=tick_worker,
     daemon=True,
-    name="NewsScheduler"
+    name="TickWorker"
 ).start()
 
-print("News Intelligence Scheduler Started")
+print("Tick Worker Thread Started")
 
 # --------------------------------------------------
-# LIVE MARKET LOOP INITIALIZATION
+# LIVE MARKET LOOP -- PERSISTENT CALLBACK MODE
 # --------------------------------------------------
 
 startup_message_sent = False
 
-while True:
+
+def on_connect(instance):
+    global startup_message_sent
+
+    print("✅ Connected to Dhan MarketFeed")
+
+    event_logger.system(
+        event="MARKET_CONNECTED",
+        message="Connected to Dhan MarketFeed"
+    )
 
     try:
-
-        print("Connecting to Dhan...")
-
-        feed = MarketFeed(
-            context,
-            instruments,
-            "v2"
-        )
-
-        print("✅ MarketFeed object created")
-
-        event_logger.system(
-            event="MARKET_CONNECTED",
-            message="Connected to Dhan MarketFeed"
-        )
-
-        # Send Telegram notification BEFORE blocking execution
         if not startup_message_sent:
-
             print("Sending Telegram Startup Message...")
 
             engine.telegram.send(
@@ -209,7 +248,6 @@ while True:
             startup_message_sent = True
 
         else:
-
             print("Sending Telegram Reconnected Message...")
 
             engine.telegram.send(
@@ -218,142 +256,84 @@ while True:
                 "Connection  : RESTORED"
             )
 
-        print("Calling run_forever()...")
-        
-        # Note: If your framework runs asynchronously in the background, 
-        # the tick loop below captures the data.
-        feed.run_forever()
-        
-        print("Processing live feed ticks...")
+    except Exception:
+        pass
 
-        while True:
 
-            tick = feed.get_data()
-            if tick is None:
-                time.sleep(0.001)
-                continue
+def on_error(instance, error):
+    print(f"\n⚠️ MarketFeed error: {error}")
 
-            # ---------------------------------
-            # Previous Close Messages
-            # ---------------------------------
-            if tick.get("type") == "Previous Close":
+    event_logger.system(
+        event="MARKET_FEED_ERROR",
+        message=str(error)
+    )
 
-                security_id = str(tick["security_id"])
-
-                symbol = loader.get_symbol(security_id)
-
-                if symbol is not None:
-                    price_engine.set_previous_close(
-                        symbol,
-                        float(tick["prev_close"])
-                    )
-                    # dEBUG ONLY
-                    # print(f"PREV CLOSE SET -> {symbol} = {tick['prev_close']}")
-                
-
-                continue
-
-            # ---------------------------------
-            # Ignore everything except live ticks
-            # ---------------------------------
-            if tick.get("type") != "Ticker Data":
-                continue
-
-            security_id = str(tick["security_id"])
-
-            symbol = loader.get_symbol(security_id)
-
-            if symbol is None:
-                print(f"Unknown Security ID : {security_id}")
-                continue
-            
-            # Optional: Flip the expected_ticks flag to True when the first tick arrives
-            if expected_ticks.get(security_id) is False:
-                expected_ticks[security_id] = True
-                
-            
-            engine.process_tick(
-                security_id=security_id,
-                symbol=symbol,
-                ltp=float(tick["LTP"]),
-                ltt=tick["LTT"]
-            )
-
-    except KeyboardInterrupt:
-
-        event_logger.system(
-            event="ENGINE_STOPPED",
-            message="Stopped by KeyboardInterrupt"
+    try:
+        engine.telegram.send(
+            f"🟡 MarketFeed error.\n{str(error)[:150]}\nReconnecting..."
         )
+    except Exception:
+        pass
 
-        print("\nStopping ORB Auto Trader...")
-        break
 
-    except ConnectionClosedError as e:
-
-        event_logger.system(
-            event="WEBSOCKET_RECONNECT",
-            message=str(e)
-        )
-
-        print("\n⚠️ WebSocket keepalive timeout.")
-        print("Reconnecting in 5 seconds...")
-
-        try:
-            engine.telegram.send(
-                "🟡 WebSocket timeout.\n"
-                "Reconnecting in 5 seconds..."
-            )
-        except Exception:
-            pass
-
-        time.sleep(5)
-
-        print("Reconnecting...")
-
-    except TimeoutError as e:
-
-        event_logger.system(
-            event="CONNECTION_TIMEOUT",
-            message=str(e)
-        )
-
-        print("\n⚠️ Connection timeout.")
-        print("Reconnecting in 5 seconds...")
-
-        try:
-            engine.telegram.send(
-                "🟡 Connection timeout.\n"
-                "Reconnecting in 5 seconds..."
-            )
-        except Exception:
-            pass
-
-        time.sleep(5)
-
-        print("Reconnecting...")
-
-    except Exception as e:
-
-        event_logger.error(
-            event="ENGINE_EXCEPTION",
-            message=str(e)
-        )
-
-        logger.log(e)
-
-        print("\n========== FULL TRACEBACK ==========")
+def on_message(instance, tick):
+    """
+    Called by the SDK the instant a tick arrives. Kept deliberately
+    lightweight -- just hands off to the queue -- so the WebSocket's
+    own event loop never gets blocked by heavy processing.
+    """
+    try:
+        if tick is not None:
+            tick_queue.put(tick)
+    except Exception:
+        print("\n========== ON_MESSAGE ERROR ==========")
         traceback.print_exc()
-        print("====================================")    
+        print("=======================================\n")
 
-        try:
-            engine.telegram.send(
-                "🔴 Dhan Connection Lost\n"
-                "Reconnecting in 5 seconds..."
-            )
-        except Exception:
-            pass
 
-        time.sleep(5)
+feed = MarketFeed(
+    context,
+    instruments,
+    "v2",
+    on_connect=on_connect,
+    on_message=on_message,
+    on_error=on_error
+)
 
-        print("Reconnecting...")
+print("✅ MarketFeed object created")
+print("Starting persistent connection (feed.run())...")
+
+try:
+    # feed.run() is a BLOCKING call that keeps a single continuous
+    # event loop alive for the whole session -- including automatic
+    # reconnect handling inside the SDK itself -- so the keepalive
+    # ping/pong exchange is never interrupted by idle gaps the way
+    # the previous get_data()-in-a-loop pattern was.
+    feed.run()
+
+except KeyboardInterrupt:
+    event_logger.system(
+        event="ENGINE_STOPPED",
+        message="Stopped by KeyboardInterrupt"
+    )
+    print("\nStopping ORB Auto Trader...")
+    feed.close_connection()
+
+except Exception as e:
+    event_logger.error(
+        event="ENGINE_EXCEPTION",
+        message=str(e)
+    )
+    logger.log(e)
+
+    print("\n========== FULL TRACEBACK ==========")
+    traceback.print_exc()
+    print("====================================")
+
+    try:
+        engine.telegram.send(
+            "🔴 Dhan Connection Lost (fatal)\n"
+            f"{str(e)[:200]}"
+        )
+    except Exception:
+        pass

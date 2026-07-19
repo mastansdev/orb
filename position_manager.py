@@ -130,6 +130,38 @@ class PositionManager:
 
     # --------------------------------------------------
 
+    def reduce_position(self, security_id, qty_sold, exit_price):
+        """
+        Partial profit booking: release the sold
+        portion's capital + PnL, keep the remainder
+        tracked correctly.
+        """
+        position = self.positions.get(security_id)
+
+        if position is None or qty_sold <= 0:
+            return False
+
+        qty_sold = min(qty_sold, position["qty"])
+
+        entry_price = position["entry_price"]
+        released_investment = qty_sold * entry_price
+        partial_pnl = (exit_price - entry_price) * qty_sold
+
+        self.capital_manager.release(
+            released_investment,
+            partial_pnl
+        )
+
+        position["qty"] -= qty_sold
+        position["investment"] -= released_investment
+
+        if position["qty"] <= 0:
+            del self.positions[security_id]
+
+        return True
+
+    # --------------------------------------------------
+
     def close_position(self, security_id, pnl):
 
         position = self.positions.get(security_id)

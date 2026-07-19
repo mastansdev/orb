@@ -55,6 +55,7 @@ class PortfolioRiskManager:
     ):
         self.max_open_trades = max_open_trades
         self.open_trades = {}
+        self.min_replacement_advantage = 15
 
     # --------------------------------------------------
     # Portfolio State
@@ -104,6 +105,39 @@ class PortfolioRiskManager:
         )
 
     # --------------------------------------------------
+    # Replacement Evaluation
+    # --------------------------------------------------
+    
+    def _should_replace(
+            self,
+            new_opportunity,
+            weakest_opportunity,
+    ):
+
+            if weakest_opportunity is None:
+                return False
+            
+            new_score = (
+                new_opportunity.conviction 
+                
+            )
+
+            weakest_score = (
+                weakest_opportunity.conviction 
+                
+            )
+
+            advantage = (
+                new_score -
+                weakest_score
+            )
+
+            return (
+                advantage >=
+                self.min_replacement_advantage
+            )
+
+    # --------------------------------------------------
     # Admission Check
     # --------------------------------------------------
 
@@ -114,10 +148,28 @@ class PortfolioRiskManager:
         # ---------------------------------
         # Maximum Open Trades
         # ---------------------------------
+        
         if len(self.open_trades) >= self.max_open_trades:
 
             weakest = self._weakest_opportunity()
 
+            if self._should_replace(
+                new_opportunity=opportunity,
+                weakest_opportunity=weakest,
+            ):
+                
+                return PortfolioDecision(
+                    action="REPLACE",
+
+                    allowed=True,
+
+                    reason=(
+                        f"Replace {weakest.symbol}"
+                    ),
+
+                    replacement_candidate=weakest,
+                )
+            
             return PortfolioDecision(
 
                 action="PORTFOLIO_FULL",
@@ -125,10 +177,12 @@ class PortfolioRiskManager:
                 allowed=False,
 
                 reason=(
+
                     f"Portfolio Full ({self.max_open_trades})"
+
                 ),
                 
-                replacement_candidate=weakest
+                replacement_candidate=weakest,
             )
             
         # ---------------------------------

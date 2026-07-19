@@ -780,6 +780,58 @@ class Brain:
 
                 intelligence.negative_strength = score
 
+            # ----------------------------
+            # Pattern Memory / Company Memory
+            # ----------------------------
+            # AVOID patterns act as negative evidence.
+            # Positive history acts as continuation
+            # support.
+            # ----------------------------
+
+            elif provider in ("PATTERN", "COMPANY"):
+
+                recommendation = str(
+                    snapshot.get("recommendation", "")
+                ).upper()
+
+                if recommendation in ("AVOID", "SELL"):
+                    intelligence.negative_strength += score
+                else:
+                    intelligence.continuation_probability = max(
+                        intelligence.continuation_probability,
+                        score
+                    )
+
+            # ----------------------------
+            # Event Intelligence / F&O Catalysts
+            # ----------------------------
+            # Structured events act like high-grade
+            # news; live F&O catalysts support
+            # continuation. Negative directions act
+            # as negative evidence.
+            # ----------------------------
+
+            elif provider in (
+                "EVENT", "FNO_CATALYST",
+                "CAUSAL", "SYMPATHY", "EVENT_RISK",
+            ):
+
+                recommendation = str(
+                    snapshot.get("recommendation", "")
+                ).upper()
+
+                if recommendation in ("AVOID", "SELL"):
+                    intelligence.negative_strength += score
+                else:
+                    intelligence.news_strength = max(
+                        intelligence.news_strength,
+                        score
+                    )
+                    if not intelligence.dominant_catalyst:
+                        intelligence.dominant_catalyst = (
+                            facts.get("catalyst", "")
+                        )
+
         return intelligence
 
     # --------------------------------------------------
@@ -1061,21 +1113,125 @@ class Brain:
         # Brain Decision
         # --------------------------------------------------
 
-        action = DecisionAction.BUY
-        if opportunity.confidence < self.minimum_confidence:
-            warnings.append(
-                f"Confidence below minimum ({opportunity.confidence:.2f})."
+        # --------------------------------------------------
+        # Institutional Decision Gate V1
+        # --------------------------------------------------
+
+        action = DecisionAction.WAIT
+
+        # Critical warning detection
+
+        critical_warning = any(
+            warning.lower().startswith((
+
+                "confidence below",
+                "score below",
+                "high evidence conflict",
+                "bullish and bearish"
+            ))
+            for warning in warnings
         )
-            action = DecisionAction.WAIT
-            
-        if opportunity.quality < self.minimum_score:
+
+        # Elite Opportunity
+        if (
+            opportunity.quality >= 85
+            and opportunity.confidence >= 80
+            and not critical_warning
+        ):
+            action = DecisionAction.BUY
+
+        # Strong Opportunity
+        elif (
+            opportunity.quality >= 75
+            and opportunity.confidence >= 70
+            and not critical_warning
+        ):
+            action = DecisionAction.BUY
+
+        # Good Opportunity (observe only)
+        elif (
+            opportunity.quality >= self.minimum_score
+            and opportunity.confidence >= self.minimum_confidence
+        ):
             warnings.append(
-                f"Score below minimum ({opportunity.quality:.2f})."
+                "Opportunity meets minimum threshold but not institutional quality."
             )
             action = DecisionAction.WAIT
 
-        
+        # Weak Opportunity
+        else:
 
+            if opportunity.confidence < self.minimum_confidence:
+                warnings.append(
+                    f"Confidence below minimum ({opportunity.confidence:.2f})."
+                )
+
+            if opportunity.quality < self.minimum_score:
+                warnings.append(
+                    f"Score below minimum ({opportunity.quality:.2f})."
+                )
+
+            action = DecisionAction.WAIT
+
+        # --------------------------------------------------
+        # Conviction Gate (CONVICTION_SPECIFICATION.md)
+        #
+        #   Evidence contributes; CONVICTION DECIDES;
+        #   Risk authorizes; Execution acts.
+        #
+        # A BUY is only allowed when the Conviction Engine
+        # (Strength × Agreement × Confidence) also agrees.
+        # --------------------------------------------------
+
+        snapshot = getattr(
+            self,
+            "latest_conviction_snapshot",
+            None
+        )
+
+        if action == DecisionAction.BUY and snapshot:
+
+            conviction_score = snapshot.get("score")
+            alignment = snapshot.get("alignment")
+
+            if conviction_score is not None:
+
+                from config import CONVICTION_MIN_SCORE
+
+                if conviction_score < CONVICTION_MIN_SCORE:
+                    action = DecisionAction.WAIT
+                    warnings.append(
+                        f"Conviction gate: "
+                        f"{conviction_score:.1f} < "
+                        f"{CONVICTION_MIN_SCORE} "
+                        f"({snapshot.get('grade')})"
+                    )
+
+                elif alignment == "BEARISH":
+                    action = DecisionAction.WAIT
+                    warnings.append(
+                        "Conviction gate: evidence alignment "
+                        "is BEARISH."
+                    )
+
+                else:
+                    reasons.append(
+                        f"Conviction {conviction_score:.1f} "
+                        f"({snapshot.get('grade')}) — "
+                        f"{snapshot.get('summary', '')}"
+                    )
+
+        print("\n========== BRAIN DECISION GATE ==========")
+        print(f"Symbol        : {opportunity.symbol}")
+        print(f"Quality       : {opportunity.quality:.2f}")
+        print(f"Confidence    : {opportunity.confidence:.2f}")
+        print(f"Action        : {action.value}")
+        print(f"Reason Count  : {len(reasons)}")
+        print(f"Top Reasons   : {reasons[:5]}")
+        print(f"Warnings      : {warnings}")
+        print("=========================================\n")
+
+        
         return Decision(
 
             symbol=opportunity.symbol,

@@ -29,7 +29,7 @@ Author : H&M ORB AUTO TRADER
 
 from collections import deque
 from datetime import datetime
-from intelligence_repository import (
+from repositories.intelligence_repository import (
     IntelligenceRepository,
 )
 import hashlib

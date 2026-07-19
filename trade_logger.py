@@ -8,71 +8,74 @@ from config import TRADE_LOG_FILE
 class TradeLogger:
 
     def __init__(self):
-
         self.file_name = TRADE_LOG_FILE
 
         if not os.path.exists(self.file_name):
-
             with open(self.file_name, "w", newline="", encoding="utf-8") as file:
-
                 writer = csv.writer(file)
-
                 writer.writerow([
-                    "Entry Date",
-                    "Entry Time",
-                    "Exit Date",
-                    "Exit Time",
-                    "Holding Seconds",
+                    "Date",
+                    "EntryTime",
                     "Symbol",
+                    "Sector",
+                    "Industry",
+                    "Theme",
                     "Qty",
-                    "Entry",
-                    "Exit",
+                    "EntryPrice",
+                    "ExitTime",
+                    "ExitPrice",
                     "PnL",
-                    "Reason"
+                    "HoldingSeconds",
+                    "ExitReason",
+                    "Conviction",
+                    "TradeID"
                 ])
 
     # --------------------------------------------------
 
     def log_trade(
         self,
-        entry_date,
+        trade_date,
         entry_time,
-        exit_date,
         exit_time,
         symbol,
-        entry,
-        exit_price,
+        sector,
+        industry,
+        theme,
         qty,
+        entry_price,
+        exit_price,
         pnl,
-        reason
+        exit_reason,
+        conviction,
     ):
-
         with open(self.file_name, "a", newline="", encoding="utf-8") as file:
-
             writer = csv.writer(file)
 
             entry_dt = datetime.strptime(
-                f"{entry_date} {entry_time}",
+                f"{trade_date} {entry_time}", 
                 "%Y-%m-%d %H:%M:%S"
             )
             exit_dt = datetime.strptime(
-                f"{exit_date} {exit_time}",
+                f"{trade_date} {exit_time}", 
                 "%Y-%m-%d %H:%M:%S"
             )
-            holding_seconds = int(
-                (exit_dt - entry_dt).total_seconds()
-            )
+            holding_seconds = int((exit_dt - entry_dt).total_seconds())
 
             writer.writerow([
-                entry_date,
+                trade_date,
                 entry_time,
-                exit_date,
-                exit_time,
-                holding_seconds,
                 symbol,
+                sector or "",
+                industry or "",
+                theme or "",
                 int(qty),
-                round(entry, 2),
-                round(exit_price, 2),
-                round(pnl, 2),
-                reason
+                round(float(entry_price), 2),
+                exit_time,
+                round(float(exit_price), 2),
+                round(float(pnl), 2),
+                holding_seconds,
+                exit_reason,
+                conviction if conviction is not None else 0,
+                f"{trade_date.replace('-', '')}_{symbol}_{entry_time.replace(':', '')}",
             ])

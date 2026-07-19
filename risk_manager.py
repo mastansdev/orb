@@ -56,24 +56,28 @@ class RiskManager:
             trade["exit_price"] = ltp
             return "STOPLOSS"
 
-        # Step 4: Replaced Target block to track target_reached and update stage
-        if ltp >= trade["target"]:
-            trade["target_reached"] = True
-            trade["stage"] = "WINNER"
-            trade["active"] = False
-            trade["exit_price"] = ltp
-            return "TARGET"
-
         # --------------------------------------------------
         # Move Stop Loss to Breakeven at 1R
+        #
+        # NOTE: this must run BEFORE the target check.
+        # With RISK_REWARD = 1.0 the old ordering made
+        # this block unreachable (target always fired
+        # first at exactly 1R).
         # --------------------------------------------------
 
-        # Step 3: Replaced breakeven block to use the new flags and update stage
         if not trade["breakeven_done"] and ltp >= trade["entry"] + trade["risk"]:
 
             trade["trail_active"] = True
             trade["trail_sl"] = trade["entry"]
             trade["breakeven_done"] = True
             trade["stage"] = "PROTECTED"
+
+        # Target
+        if ltp >= trade["target"]:
+            trade["target_reached"] = True
+            trade["stage"] = "WINNER"
+            trade["active"] = False
+            trade["exit_price"] = ltp
+            return "TARGET"
 
         return "ACTIVE"

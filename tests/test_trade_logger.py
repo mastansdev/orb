@@ -11,14 +11,26 @@ print("=" * 60)
 logger = TradeLogger()
 
 logger.log_trade(
-    "2026-06-28",
-    "10:15:20",
-    "SBIN",
-    1027.00,
-    1055.00,
-    25,
-    700.00,
-    "TARGET"
+    trade_date="2026-06-28",
+    entry_time="10:15:20",
+    exit_time="10:48:10",
+
+    symbol="SBIN",
+
+    sector="Banking",
+    industry="Private Bank",
+    theme="Financial Services",
+
+    qty=25,
+
+    entry_price=1027.00,
+    exit_price=1055.00,
+
+    pnl=700.00,
+
+    exit_reason="TARGET",
+
+    conviction=92,
 )
 
 print("✓ Dummy Trade Logged")

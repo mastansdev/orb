@@ -21,7 +21,7 @@ class TelegramCommandCenter:
             "/capital": self.cmd_capital,
             "/mtm": self.cmd_mtm,
             "/positions": self.cmd_positions,
-            "/health": self.cmd_health,   
+            "/health": self.cmd_health,
             "/tickaudit": self.cmd_tick_audit,
 
             "/pause": self.cmd_pause,
@@ -30,6 +30,27 @@ class TelegramCommandCenter:
             "/tradingon": self.cmd_trading_on,
 
             "/exitall": self.cmd_exit_all,
+
+            # Institutional intelligence
+            "/risk": self.cmd_risk,
+            "/memory": self.cmd_memory,
+            "/company": self.cmd_company,
+            "/pool": self.cmd_pool,
+            "/sectors": self.cmd_sectors,
+
+            # Institutional desk commands
+            "/brief": self.cmd_brief,
+            "/fno": self.cmd_fno,
+            "/exposure": self.cmd_exposure,
+            "/calibration": self.cmd_calibration,
+            "/events": self.cmd_events,
+            "/journal": self.cmd_journal,
+            "/eod": self.cmd_eod,
+            "/graph": self.cmd_graph,
+            "/calendar": self.cmd_calendar,
+            "/edge": self.cmd_edge,
+            "/execution": self.cmd_execution,
+            "/causal": self.cmd_causal,
         }
 
     # ---------------------------------
@@ -238,6 +259,200 @@ class TelegramCommandCenter:
 
     # ---------------------------------
 
+    def cmd_risk(self, args):
+        status = self.engine.risk_status()
+
+        locked_line = "🔒 LOCKED" if status["locked"] else "🟢 ACTIVE"
+
+        message = (
+            "🛡️ RISK GOVERNOR\n\n"
+            f"State        : {locked_line}\n"
+        )
+
+        if status["locked"]:
+            message += f"Reason       : {status['lock_reason']}\n"
+
+        message += (
+            f"Day PnL      : ₹{status['day_pnl']:.2f}\n"
+            f"Loss Limit   : ₹{status['daily_max_loss']}\n"
+            f"Loss Streak  : {status['consecutive_losses']}"
+            f"/{status['max_consecutive_losses']}\n"
+            f"Heat         : ₹{status['portfolio_heat']:.0f}"
+            f"/₹{status['max_portfolio_heat']}\n"
+            f"Blocked      : {status['entries_blocked']} entries\n"
+            f"Closed       : {status['trades_closed']} trades"
+        )
+
+        self.engine.telegram.send(message)
+
+    # ---------------------------------
+
+    def cmd_memory(self, args):
+        if not args:
+            self.engine.telegram.send(
+                "Usage: /memory SYMBOL"
+            )
+            return
+
+        symbol = args[0].upper()
+        report = self.engine.memory_report(symbol)
+        self.engine.telegram.send(f"🧠 {report}")
+
+    # ---------------------------------
+
+    def cmd_company(self, args):
+        if not args:
+            self.engine.telegram.send(
+                "Usage: /company SYMBOL"
+            )
+            return
+
+        symbol = args[0].upper()
+        report = self.engine.company_report(symbol)
+        self.engine.telegram.send(f"🏢 {report}")
+
+    # ---------------------------------
+
+    def cmd_pool(self, args):
+        report = self.engine.opportunity_pool_report()
+        self.engine.telegram.send(f"🎯 {report}")
+
+    # ---------------------------------
+
+    def cmd_sectors(self, args):
+        count = self.engine.record_sector_memory()
+        rankings = self.engine.sector() or []
+
+        lines = ["📊 SECTOR RANKINGS", ""]
+
+        for i, entry in enumerate(rankings[:10], start=1):
+            if isinstance(entry, dict):
+                name = entry.get("sector") or entry.get("name") or "?"
+                score = (
+                    entry.get("score")
+                    or entry.get("participation")
+                    or 0
+                )
+                lines.append(f"{i:02d}. {name} ({score})")
+            else:
+                lines.append(f"{i:02d}. {entry}")
+
+        lines.append("")
+        lines.append(f"Recorded {count} sectors to memory.")
+
+        self.engine.telegram.send("\n".join(lines))
+
+    # ---------------------------------
+
+    def cmd_brief(self, args):
+        self.engine.telegram.send(
+            self.engine.morning_brief()
+        )
+
+    # ---------------------------------
+
+    def cmd_fno(self, args):
+        self.engine.telegram.send(
+            f"🎯 {self.engine.fno_report()}"
+        )
+
+    # ---------------------------------
+
+    def cmd_exposure(self, args):
+        self.engine.telegram.send(
+            f"📊 {self.engine.exposure_report()}"
+        )
+
+    # ---------------------------------
+
+    def cmd_calibration(self, args):
+        self.engine.telegram.send(
+            f"🎓 {self.engine.calibration_report()}"
+        )
+
+    # ---------------------------------
+
+    def cmd_events(self, args):
+        symbol = args[0].upper() if args else None
+        self.engine.telegram.send(
+            f"📰 {self.engine.events_report(symbol)}"
+        )
+
+    # ---------------------------------
+
+    def cmd_journal(self, args):
+        self.engine.telegram.send(
+            f"📓 {self.engine.journal_report()}"
+        )
+
+    # ---------------------------------
+
+    def cmd_eod(self, args):
+        self.engine.telegram.send(
+            f"🌇 {self.engine.eod_report()}"
+        )
+
+    # ---------------------------------
+
+    def cmd_edge(self, args):
+        self.engine.telegram.send(
+            f"📐 {self.engine.edge_report()}"
+        )
+
+    # ---------------------------------
+
+    def cmd_execution(self, args):
+        self.engine.telegram.send(
+            f"🎯 {self.engine.execution_report()}"
+        )
+
+    # ---------------------------------
+
+    def cmd_causal(self, args):
+        symbol = args[0].upper() if args else None
+        self.engine.telegram.send(
+            f"🧩 {self.engine.causal_report(symbol)}"
+        )
+
+    # ---------------------------------
+
+    def cmd_graph(self, args):
+        if not args:
+            self.engine.telegram.send(
+                "Usage: /graph SYMBOL"
+            )
+            return
+
+        self.engine.telegram.send(
+            f"🕸️ {self.engine.graph_report(args[0].upper())}"
+        )
+
+    # ---------------------------------
+
+    def cmd_calendar(self, args):
+        # /calendar               → show upcoming
+        # /calendar SYMBOL DATE   → add entry
+        if len(args) >= 2:
+            added = self.engine.calendar_add(
+                args[0], args[1]
+            )
+            if added:
+                self.engine.telegram.send(
+                    f"📅 Added: {args[0].upper()} "
+                    f"on {args[1]}"
+                )
+            else:
+                self.engine.telegram.send(
+                    "Usage: /calendar SYMBOL YYYY-MM-DD"
+                )
+            return
+
+        self.engine.telegram.send(
+            f"📅 {self.engine.calendar_report()}"
+        )
+
+    # ---------------------------------
+
     def help(self):
         self.engine.telegram.send(
             "Available Commands\n\n"
@@ -247,6 +462,23 @@ class TelegramCommandCenter:
             "/positions\n"
             "/health\n"
             "/tickaudit\n\n"
+            "/risk — risk governor state\n"
+            "/memory SYMBOL — pattern memory\n"
+            "/company SYMBOL — company dossier\n"
+            "/pool — opportunity pool\n"
+            "/sectors — sector rankings\n\n"
+            "/brief — institutional morning brief\n"
+            "/fno — F&O catalyst watchlist\n"
+            "/exposure — portfolio concentration\n"
+            "/calibration — conviction vs outcomes\n"
+            "/events [SYMBOL] — event memory\n"
+            "/journal — today's decisions\n"
+            "/eod — end of day report\n"
+            "/graph SYMBOL — knowledge graph\n"
+            "/calendar [SYMBOL DATE] — results calendar\n"
+            "/edge — edge analysis (net of charges)\n"
+            "/execution — slippage / fill quality\n"
+            "/causal [SYMBOL] — cause-effect chains\n\n"
             "/pause\n"
             "/resume\n\n"
             "/tradingoff\n"

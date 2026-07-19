@@ -13,6 +13,9 @@ from collectors.bse_corporate_collector import (
 from collectors.news_rss_collector import (
     NewsRSSCollector,
 )
+from collectors.regulatory_collector import (
+    RegulatoryCollector,
+)
 from news_models import (
     ProcessedNews,
 )
@@ -57,6 +60,11 @@ class RailwayNewsEngine:
 
         self.register_collector(
             NewsRSSCollector()
+        )
+
+        # Primary regulatory carriers: SEBI / RBI / PIB
+        self.register_collector(
+            RegulatoryCollector()
         )
 
     # --------------------------------------------------

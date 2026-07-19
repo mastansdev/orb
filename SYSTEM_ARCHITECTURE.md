@@ -608,6 +608,84 @@ No module should bypass this flow.
 
 ---
 
+# INSTITUTIONAL LAYER (v2.1)
+
+Added in the institutional upgrade. Every module below is live and tested.
+
+## Risk Governor (risk_governor.py)
+
+Independent risk authority with VETO power. Final gate before execution.
+
+Enforces
+
+* Daily loss lockout (DAILY_MAX_LOSS, realized + floating) — kill switch, no override, optional exit-all
+* Daily profit lock (entries pause)
+* Consecutive-loss pause (MAX_CONSECUTIVE_LOSSES)
+* Portfolio heat cap (MAX_PORTFOLIO_HEAT — sum of open risk)
+* Sector concentration cap (MAX_POSITIONS_PER_SECTOR)
+
+Constitution: Evidence contributes → Conviction decides → RISK AUTHORIZES → Execution acts.
+
+## Conviction Engine (complete)
+
+Conviction = Strength × Agreement × Confidence (per CONVICTION_SPECIFICATION.md).
+
+* Strength — average provider score
+* Agreement — fraction of directional providers aligned
+* Confidence — average confidence × completeness discount × conflict discount
+* Output: score, grade (A+/A/B/C), alignment, conflicts, summary
+
+The Brain enforces a conviction gate: BUY requires conviction ≥ CONVICTION_MIN_SCORE and non-BEARISH alignment.
+
+## Memory Repository (repositories/memory_repository.py)
+
+Persistent SQLite memory (institutional_memory.db). Survives restarts.
+
+Tables: market_events, orb_outcomes, trade_outcomes, sector_days, company_events.
+
+## Market Memory (persistent)
+
+Now persists every catalyst, every ORB outcome, every trade outcome,
+and daily sector leadership. Supports similar-event recall.
+
+## Pattern Engine (pattern_engine.py)
+
+Reads memory, emits PATTERN evidence:
+
+* Repeated ORB failure today → AVOID evidence
+* Poor/strong historical ORB win rate → AVOID/BUY evidence
+* Sector leadership streak (3+ days top-3) → BUY evidence
+
+## Company Intelligence (company_intelligence.py)
+
+Permanent per-company dossier: static profile (750 companies seeded from
+master database), permanent event history (news, trades), behavioral stats.
+Emits COMPANY evidence from our own trading history with the stock.
+
+## News Connection
+
+News evidence (Railway stories → Brain) is now part of the live decision
+flow: structural + news + pattern + company evidence all validated and
+scored together.
+
+## Telegram Commands (extended)
+
+/risk /memory SYMBOL /company SYMBOL /pool /sectors — plus the original set.
+
+## Trade Flow (updated)
+
+Signal → Evidence (structural + news + pattern + company)
+→ Conviction (Strength × Agreement × Confidence)
+→ Brain Decision Gate (+ conviction gate)
+→ Portfolio Risk Manager
+→ RISK GOVERNOR (final veto)
+→ Execution
+→ Position Management
+→ Exit → Memory Recording (ORB outcome, trade outcome,
+  company history, risk governor feedback)
+
+---
+
 # LONG-TERM VISION
 
 Build an institutional-grade ORB trading framework where every trade is evaluated using multiple independent intelligence engines before capital is committed.
