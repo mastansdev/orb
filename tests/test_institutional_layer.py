@@ -1698,6 +1698,101 @@ def test_reaction_decay():
 
 
 # ==========================================================
+# Results Watchlist + Decision Memory
+# ==========================================================
+
+def test_watchlist_and_decisions():
+    print("\nResults Watchlist + Decision Memory")
+
+    from repositories.memory_repository import MemoryRepository
+    from intelligence.results_calendar import ResultsCalendar
+    from intelligence.results_watchlist import ResultsWatchlist
+    from datetime import datetime
+
+    db_file = os.path.join(
+        tempfile.gettempdir(), "test_watchlist.db"
+    )
+    if os.path.exists(db_file):
+        os.remove(db_file)
+
+    repo = MemoryRepository(db_file)
+    calendar = ResultsCalendar(repository=repo)
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    calendar.add("RESULTCO", today)
+    calendar.add("QUIETCO", today)
+
+    wl = ResultsWatchlist(results_calendar=calendar)
+
+    # Both start WATCHING
+    check("reports today → watching", wl.is_watching("RESULTCO"))
+    check("not announced yet", not wl.is_announced("RESULTCO"))
+    check(
+        "watching → no positive evidence",
+        wl.build_evidence("RESULTCO") == []
+    )
+
+    # Result publishes → ANNOUNCED
+    wl.on_event({
+        "symbol": "RESULTCO",
+        "event_type": "RESULTS_BEAT",
+        "catalyst": "RESULTS",
+        "importance": 70,
+        "headline": "RESULTCO Q1 profit up 22%",
+    })
+    check("result event → announced", wl.is_announced("RESULTCO"))
+    check(
+        "announced → no longer watching",
+        not wl.is_watching("RESULTCO")
+    )
+
+    ev = wl.build_evidence("RESULTCO")
+    check("announced → catalyst evidence", len(ev) == 1)
+    check(
+        "catalyst is bullish",
+        ev[0].recommendation == "BUY"
+        and ev[0].provider == "RESULTS_LIVE"
+    )
+
+    # QUIETCO still watching (no event)
+    check("other stock still watching", wl.is_watching("QUIETCO"))
+
+    check("watchlist report renders", "WATCHLIST" in wl.report())
+
+    # --- Decision memory ---
+    repo.save_decision(
+        symbol="AAA", action="ENTRY_ORB",
+        reason="sector strong + causal RBI cut",
+        sector="NBFC", conviction=72,
+    )
+    repo.save_decision(
+        symbol="AAA", action="EXIT_TARGET",
+        reason="target hit +1R", conviction=72, pnl=1500,
+    )
+    repo.save_decision(
+        symbol="BBB", action="REJECT",
+        reason="results today — binary block",
+    )
+
+    aaa = repo.decisions_for_symbol("AAA")
+    check("decisions recorded per symbol", len(aaa) == 2)
+    check(
+        "decision reason stored",
+        any("causal" in d["reason"] for d in aaa)
+    )
+
+    today_dec = repo.decisions_for_date(today)
+    check("decisions queryable by date", len(today_dec) == 3)
+
+    counts = repo.decision_counts()
+    check("decision counts tally", len(counts) >= 2)
+    total = sum(c["count"] for c in counts)
+    check("total decisions counted", total == 3)
+
+    repo.close()
+
+
+# ==========================================================
 # Brain conviction gate (integration)
 # ==========================================================
 
@@ -1747,6 +1842,7 @@ if __name__ == "__main__":
     test_strict_calendar_matching()
     test_leverage_and_profiles()
     test_reaction_decay()
+    test_watchlist_and_decisions()
     test_brain_gate()
 
     print()

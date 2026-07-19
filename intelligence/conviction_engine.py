@@ -59,6 +59,7 @@ class ConvictionEngine:
         "CAUSAL",
         "SYMPATHY",
         "EVENT_RISK",
+        "RESULTS_LIVE",
     )
 
     # Environment providers influence conviction but can

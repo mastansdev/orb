@@ -149,6 +149,26 @@ class MemoryRepository:
             CREATE INDEX IF NOT EXISTS idx_sevents_type
                 ON structured_events(event_type);
 
+            CREATE TABLE IF NOT EXISTS trade_decisions(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT,
+                trade_date TEXT,
+                time TEXT,
+                symbol TEXT,
+                action TEXT,
+                sector TEXT,
+                conviction REAL,
+                reason TEXT,
+                evidence TEXT,
+                pnl REAL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_decisions_date
+                ON trade_decisions(trade_date);
+
+            CREATE INDEX IF NOT EXISTS idx_decisions_symbol
+                ON trade_decisions(symbol);
+
             """)
             self.db.commit()
 
@@ -766,6 +786,124 @@ class MemoryRepository:
                 "direction": r[2],
                 "abnormal_move": r[3],
             }
+            for r in rows
+        ]
+
+    # --------------------------------------------------
+
+    def save_decision(
+        self,
+        symbol,
+        action,
+        reason,
+        sector="",
+        conviction=0,
+        evidence="",
+        pnl=None,
+    ):
+        """
+        Permanent record of WHY every trade action was
+        taken: ENTRY / EXIT / HOLD / REJECT / REPLACE.
+        This is the memory that lets the bot explain
+        itself and learn across 200+ days.
+        """
+        now = datetime.now()
+        with self._lock:
+            self.cursor.execute(
+                """
+                INSERT INTO trade_decisions(
+                    created_at, trade_date, time, symbol,
+                    action, sector, conviction, reason,
+                    evidence, pnl
+                )
+                VALUES(?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    self._now(),
+                    self._today(),
+                    now.strftime("%H:%M:%S"),
+                    symbol,
+                    action,
+                    sector,
+                    conviction or 0,
+                    str(reason)[:500],
+                    str(evidence)[:1000],
+                    pnl,
+                ),
+            )
+            self.db.commit()
+
+    # --------------------------------------------------
+
+    def decisions_for_date(self, trade_date, limit=200):
+        with self._lock:
+            self.cursor.execute(
+                """
+                SELECT time, symbol, action, conviction,
+                       reason, pnl
+                FROM trade_decisions
+                WHERE trade_date = ?
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (trade_date, limit),
+            )
+            rows = self.cursor.fetchall()
+
+        return [
+            {
+                "time": r[0], "symbol": r[1],
+                "action": r[2], "conviction": r[3],
+                "reason": r[4], "pnl": r[5],
+            }
+            for r in rows
+        ]
+
+    # --------------------------------------------------
+
+    def decisions_for_symbol(self, symbol, limit=50):
+        with self._lock:
+            self.cursor.execute(
+                """
+                SELECT trade_date, time, action,
+                       conviction, reason, pnl
+                FROM trade_decisions
+                WHERE symbol = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (symbol, limit),
+            )
+            rows = self.cursor.fetchall()
+
+        return [
+            {
+                "trade_date": r[0], "time": r[1],
+                "action": r[2], "conviction": r[3],
+                "reason": r[4], "pnl": r[5],
+            }
+            for r in rows
+        ]
+
+    # --------------------------------------------------
+
+    def decision_counts(self, days_back=200):
+        """Action tally over recent history (learning stats)."""
+        with self._lock:
+            self.cursor.execute(
+                """
+                SELECT action, COUNT(*),
+                       COALESCE(SUM(pnl),0)
+                FROM trade_decisions
+                GROUP BY action
+                ORDER BY COUNT(*) DESC
+                """
+            )
+            rows = self.cursor.fetchall()
+
+        return [
+            {"action": r[0], "count": r[1],
+             "pnl": round(r[2], 2)}
             for r in rows
         ]
 

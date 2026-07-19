@@ -2,7 +2,7 @@
 
 ## Current Version
 
-**Version:** 3.1.0-INSTITUTIONAL-AI
+**Version:** 3.2.0-INSTITUTIONAL-AI
 
 ---
 
@@ -153,7 +153,7 @@
 
 ### Tests
 
-* tests/test_institutional_layer.py (171 checks)
+* tests/test_institutional_layer.py (185 checks)
 * tools/smoke_test.py (end-to-end paper pipeline, 23 checks)
 * Refreshed: risk manager, strategy, position manager,
   capital manager tests

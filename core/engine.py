@@ -299,6 +299,16 @@ class Engine:
             repository=self.market_memory.repository
         )
 
+        # Results Watchlist : pre-result WATCH → post-result
+        # CATALYST (active daily opportunity funnel)
+        from intelligence.results_watchlist import (
+            ResultsWatchlist,
+        )
+        self.results_watchlist = ResultsWatchlist(
+            results_calendar=self.results_calendar,
+            event_intelligence=self.event_intelligence,
+        )
+
         # Calendar Harvester : auto-populate the
         # calendar from board-meeting intimations
         from intelligence.calendar_harvester import CalendarHarvester
@@ -329,6 +339,9 @@ class Engine:
         # Share with trade selection for evidence scaling
         self.trade_selection_engine.reaction_decay = (
             self.reaction_decay
+        )
+        self.trade_selection_engine.results_watchlist = (
+            self.results_watchlist
         )
 
         # Market State + Shock Responder
@@ -972,6 +985,28 @@ class Engine:
                     self._entered_today.add(symbol)
                     self.position_recovery.save(self.trades)
 
+                    # Permanent decision memory: WHY we entered
+                    try:
+                        reasons = getattr(
+                            brain, "reasons", []
+                        ) or []
+                        self.market_memory.repository.save_decision(
+                            symbol=symbol,
+                            action=f"ENTRY_{entry_mode}",
+                            reason=" | ".join(
+                                str(r) for r in reasons[:6]
+                            ),
+                            sector=new_trade.get("sector", ""),
+                            conviction=new_trade.get(
+                                "conviction", 0
+                            ),
+                            evidence=" | ".join(
+                                str(r) for r in reasons
+                            ),
+                        )
+                    except Exception as dec_err:
+                        print(f"[DECISION] {dec_err}")
+
             # ---------------------------------
             # POSITION EXIT PIPELINE
             # ---------------------------------
@@ -1192,6 +1227,21 @@ class Engine:
                             symbol=symbol,
                             exit_reason=result,
                             pnl=pnl
+                        )
+
+                        # Permanent decision memory: WHY exit
+                        self.market_memory.repository.save_decision(
+                            symbol=symbol,
+                            action=f"EXIT_{result}",
+                            reason=(
+                                f"Exit {result} @ {ltp:.2f} "
+                                f"(entry {trade.get('entry', 0):.2f}, "
+                                f"held {trade.get('entry_time', '')}"
+                                f"→{ltt})"
+                            ),
+                            sector=trade.get("sector", ""),
+                            conviction=trade.get("conviction", 0),
+                            pnl=round(pnl, 2),
                         )
 
                     except Exception as memory_error:
@@ -1739,8 +1789,178 @@ class Engine:
 
     # --------------------------------------------------
 
+    def premarket_brief(self):
+        """
+        THE pre-market intelligence brief.
+
+        Combines today's known context with everything
+        the bot has LEARNED across all prior days:
+          • results-day watchlist (block + hunt)
+          • active causal chains (news → expected effect)
+          • reaction-decay expectations per event type
+          • recent event outcomes (how the market actually
+            reacted last time)
+
+        This is the "these news are around the market →
+        market may react this way" report that grows
+        sharper every trading day.
+        """
+        lines = ["🌅 PRE-MARKET INTELLIGENCE BRIEF", ""]
+
+        # 1. Risk state
+        risk = self.risk_status()
+        lines.append(
+            f"Risk : "
+            f"{'🔒 LOCKED' if risk['locked'] else '🟢 clear'} "
+            f"| Regime {risk.get('regime', 'WARMUP')} "
+            f"| Day loss cap ₹{risk['daily_max_loss']:,.0f}"
+        )
+
+        # 2. Results today (block + hunt)
+        try:
+            wl = self.results_watchlist
+            wl.rebuild()
+            watching = [
+                s for s, e in wl.today.items()
+                if e["state"] == "WATCHING"
+            ]
+            if watching:
+                lines.append("")
+                lines.append(
+                    f"📊 REPORT TODAY ({len(watching)}) — "
+                    f"entries BLOCKED pre-result, hunted "
+                    f"AFTER announcement:"
+                )
+                lines.append(
+                    "  " + ", ".join(sorted(watching)[:20])
+                )
+        except Exception:
+            pass
+
+        # 3. Active causal chains (news → effect)
+        try:
+            chains = self.causal_engine.active_chains
+            if chains:
+                lines.append("")
+                lines.append(
+                    f"🧩 ACTIVE CAUSAL CHAINS "
+                    f"({len(chains)}) — news already in "
+                    f"the system and how it should move "
+                    f"stocks:"
+                )
+                seen = set()
+                for c in sorted(
+                    chains, key=lambda x: -x["strength"]
+                )[:6]:
+                    key = c["model_key"]
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    sign = "▲" if c["sign"] > 0 else "▼"
+                    lines.append(
+                        f"  {sign} {c['target']} "
+                        f"— {c['root_cause'][:70]}"
+                    )
+        except Exception:
+            pass
+
+        # 4. Reaction-decay expectations (learned)
+        try:
+            types = (
+                self.market_memory.repository
+                .known_event_types()
+            )
+            if types:
+                lines.append("")
+                lines.append(
+                    "📉 LEARNED REACTIONS — how the market "
+                    "NOW reacts to recurring events:"
+                )
+                for t in types[:6]:
+                    m = self.reaction_decay.model(
+                        t["event_type"]
+                    )
+                    if m["status"] == "INSUFFICIENT":
+                        continue
+                    trend = (
+                        "↓ fading" if m["status"] == "DECAYING"
+                        else "→ steady"
+                    )
+                    lines.append(
+                        f"  {t['event_type']}: "
+                        f"~{m['expected_magnitude']}% move "
+                        f"{trend} (n={m['samples']})"
+                    )
+        except Exception:
+            pass
+
+        # 5. Learning depth
+        try:
+            counts = (
+                self.market_memory.repository
+                .decision_counts()
+            )
+            total = sum(c["count"] for c in counts)
+            if total:
+                lines.append("")
+                lines.append(
+                    f"🧠 Decision memory: {total} recorded "
+                    f"actions across all sessions."
+                )
+        except Exception:
+            pass
+
+        if len(lines) <= 3:
+            lines.append("")
+            lines.append(
+                "Memory is still building. This brief "
+                "sharpens with every trading day — after "
+                "~200 days it will pre-empt the market's "
+                "likely reaction from history."
+            )
+
+        return "\n".join(lines)
+
+    # --------------------------------------------------
+
     def decay_report(self, event_type=None):
         return self.reaction_decay.report(event_type)
+
+    # --------------------------------------------------
+
+    def premarket_report(self):
+        return self.premarket_brief()
+
+    # --------------------------------------------------
+
+    def watchlist_report(self):
+        return self.results_watchlist.report()
+
+    # --------------------------------------------------
+
+    def why_report(self, symbol):
+        """Every decision the bot ever made on a symbol."""
+        rows = self.market_memory.repository.decisions_for_symbol(
+            symbol.upper()
+        )
+        if not rows:
+            return (
+                f"DECISION HISTORY : {symbol.upper()}\n\n"
+                "No recorded decisions yet."
+            )
+
+        lines = [f"DECISION HISTORY : {symbol.upper()}", ""]
+        for r in rows[:15]:
+            pnl = (
+                f" ₹{r['pnl']}" if r["pnl"] is not None
+                else ""
+            )
+            lines.append(
+                f"{r['trade_date']} {r['time']} "
+                f"[{r['action']}]{pnl}"
+            )
+            lines.append(f"   {r['reason'][:90]}")
+        return "\n".join(lines)
 
     # --------------------------------------------------
 

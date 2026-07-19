@@ -152,6 +152,15 @@ class TradeSelectionEngine:
                                 event
                             )
 
+                        # Results watchlist: flip a
+                        # results-day stock WATCHING →
+                        # ANNOUNCED when its result lands.
+                        rw = getattr(
+                            self, "results_watchlist", None
+                        )
+                        if rw is not None:
+                            rw.on_event(event)
+
                         # Causal reasoning: activate
                         # institutional cause-effect chains
                         if self.causal_engine is not None:
@@ -259,32 +268,58 @@ class TradeSelectionEngine:
                 print(f"[FNO] {e}")
 
         # ---------------------------------
-        # Binary-event risk : results today?
+        # Results-day handling:
+        #   WATCHING (result not out)  → BLOCK entry
+        #   ANNOUNCED (result is out)  → live catalyst
         # ---------------------------------
         event_risk_evidence = []
+        results_live_evidence = []
 
-        if self.results_calendar is not None:
+        rw = getattr(self, "results_watchlist", None)
+
+        if rw is not None:
+            try:
+                # Pre-result: hard block (binary-event risk)
+                if rw.is_watching(symbol):
+                    from config import RESULTS_DAY_BLOCK
+                    if RESULTS_DAY_BLOCK:
+                        self.skipped += 1
+                        return self._build_decision(
+                            selected=False,
+                            score=0,
+                            reasons=[
+                                f"{symbol}: reports TODAY, "
+                                f"result not out yet — "
+                                f"no new risk into binary "
+                                f"event (watching)"
+                            ],
+                            brain_decision=None
+                        )
+
+                # Post-result: positive catalyst boost
+                results_live_evidence = rw.build_evidence(
+                    symbol
+                )
+            except Exception as e:
+                print(f"[WATCHLIST] {e}")
+
+        elif self.results_calendar is not None:
+            # Fallback if watchlist not attached
             try:
                 event_risk_evidence = (
                     self.results_calendar.build_evidence(
                         symbol
                     )
                 )
-
                 from config import RESULTS_DAY_BLOCK
-
-                if (
-                    RESULTS_DAY_BLOCK
-                    and event_risk_evidence
-                ):
+                if RESULTS_DAY_BLOCK and event_risk_evidence:
                     self.skipped += 1
                     return self._build_decision(
                         selected=False,
                         score=0,
                         reasons=[
-                            f"{symbol}: results/board "
-                            f"meeting today — no new risk "
-                            f"into binary events"
+                            f"{symbol}: results today — "
+                            f"binary event block"
                         ],
                         brain_decision=None
                     )
@@ -337,6 +372,7 @@ class TradeSelectionEngine:
             + event_evidence
             + fno_evidence
             + event_risk_evidence
+            + results_live_evidence
             + sympathy_evidence
             + causal_evidence
         )

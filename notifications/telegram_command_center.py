@@ -53,6 +53,9 @@ class TelegramCommandCenter:
             "/causal": self.cmd_causal,
             "/decay": self.cmd_decay,
             "/shockmodel": self.cmd_shockmodel,
+            "/premarket": self.cmd_premarket,
+            "/watchlist": self.cmd_watchlist,
+            "/why": self.cmd_why,
             "/news": self.cmd_news,
             "/profile": self.cmd_profile,
             "/market": self.cmd_market,
@@ -438,6 +441,30 @@ class TelegramCommandCenter:
 
     # ---------------------------------
 
+    def cmd_premarket(self, args):
+        self.engine.telegram.send(
+            self.engine.premarket_report()
+        )
+
+    # ---------------------------------
+
+    def cmd_watchlist(self, args):
+        self.engine.telegram.send(
+            f"📊 {self.engine.watchlist_report()}"
+        )
+
+    # ---------------------------------
+
+    def cmd_why(self, args):
+        if not args:
+            self.engine.telegram.send("Usage: /why SYMBOL")
+            return
+        self.engine.telegram.send(
+            f"🧠 {self.engine.why_report(args[0])}"
+        )
+
+    # ---------------------------------
+
     def cmd_news(self, args):
         self.engine.telegram.send(
             f"📡 {self.engine.news_pipeline_report()}"
@@ -576,6 +603,11 @@ class TelegramCommandCenter:
             "/edge — edge analysis (net of charges)\n"
             "/execution — slippage / fill quality\n"
             "/causal [SYMBOL] — cause-effect chains\n"
+            "/premarket — pre-market intelligence brief\n"
+            "/watchlist — today's results watchlist\n"
+            "/why SYMBOL — every decision on a stock\n"
+            "/shockmodel — reaction decay (1st>2nd)\n"
+            "/decay TYPE — decay for one event type\n"
             "/news — Railway→Brain pipeline health\n"
             "/profile — capital / leverage / margin\n"
             "/market — regime + adaptive limits\n"

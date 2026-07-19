@@ -814,6 +814,7 @@ class Brain:
             elif provider in (
                 "EVENT", "FNO_CATALYST",
                 "CAUSAL", "SYMPATHY", "EVENT_RISK",
+                "RESULTS_LIVE",
             ):
 
                 recommendation = str(
