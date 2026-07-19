@@ -56,6 +56,9 @@ class ResultsCalendar:
         self._load_from_db()
         self._load_from_csv()
 
+        # Self-heal legacy corruption on every startup
+        self.dedupe()
+
     # --------------------------------------------------
 
     def _ensure_table(self):
@@ -164,6 +167,39 @@ class ResultsCalendar:
         except ValueError:
             return False
 
+        # --------------------------------------------------
+        # HARD RULE: one symbol = one RESULTS date.
+        # A company reports once per quarter. If this
+        # symbol already has a future results date, keep
+        # the EARLIER one (the scheduled board meeting)
+        # and drop the rest. This kills the
+        # "AIIL-on-every-day" corruption at the source.
+        # --------------------------------------------------
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        existing_dates = [
+            d for d, syms in self._calendar.items()
+            if symbol in syms and d >= today
+        ]
+
+        if existing_dates:
+            keep = min(existing_dates + [event_date])
+
+            # Remove the symbol from every other future date
+            for d in existing_dates:
+                if d != keep:
+                    self._calendar[d].discard(symbol)
+                    if not self._calendar[d]:
+                        del self._calendar[d]
+
+            self._db_remove_symbol_except(symbol, keep)
+
+            # If an earlier date already existed, keep it
+            if keep != event_date:
+                return True
+
+            event_date = keep
+
         self._calendar.setdefault(
             event_date, set()
         ).add(symbol)
@@ -186,6 +222,70 @@ class ResultsCalendar:
                 pass
 
         return True
+
+    # --------------------------------------------------
+
+    def _db_remove_symbol_except(self, symbol, keep_date):
+        """Delete a symbol's future rows except keep_date."""
+        if self.repository is None:
+            return
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        try:
+            with self.repository._lock:
+                self.repository.cursor.execute(
+                    "DELETE FROM results_calendar "
+                    "WHERE symbol = ? "
+                    "AND event_date >= ? "
+                    "AND event_date != ?",
+                    (symbol, today, keep_date),
+                )
+                self.repository.db.commit()
+        except Exception:
+            pass
+
+    # --------------------------------------------------
+
+    def dedupe(self):
+        """
+        Self-heal: enforce one-date-per-symbol across
+        the whole calendar (keeps earliest future date).
+        Run at startup to clean legacy garbage.
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        symbol_dates = {}
+        for date, symbols in self._calendar.items():
+            if date < today:
+                continue
+            for symbol in symbols:
+                symbol_dates.setdefault(
+                    symbol, []
+                ).append(date)
+
+        cleaned = 0
+        for symbol, dates in symbol_dates.items():
+            if len(dates) <= 1:
+                continue
+
+            keep = min(dates)
+            for date in dates:
+                if date != keep:
+                    self._calendar[date].discard(symbol)
+                    if not self._calendar[date]:
+                        del self._calendar[date]
+                    cleaned += 1
+
+            self._db_remove_symbol_except(symbol, keep)
+
+        if cleaned:
+            print(
+                f"[CALENDAR] Deduped {cleaned} duplicate "
+                f"symbol-dates (one company = one results "
+                f"date)"
+            )
+
+        return cleaned
 
     # --------------------------------------------------
     # PUBLIC : Query

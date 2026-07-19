@@ -1477,6 +1477,41 @@ def test_strict_calendar_matching():
         and "WEEK AHEAD" in report
     )
 
+    # ONE symbol = ONE results date (the AIIL-every-day
+    # corruption must be impossible)
+    d1 = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    d2 = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
+    d3 = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
+
+    calendar.add("DUPCO", d2)
+    calendar.add("DUPCO", d3)   # later → ignored
+    calendar.add("DUPCO", d1)   # earlier → replaces
+
+    dup_dates = [
+        date for date, syms in calendar._calendar.items()
+        if "DUPCO" in syms
+    ]
+    check(
+        "one symbol = one date (add enforces)",
+        dup_dates == [d1]
+    )
+
+    # dedupe() self-heals pre-existing corruption
+    calendar._calendar.setdefault(d2, set()).add("LEGACYCO")
+    calendar._calendar.setdefault(d3, set()).add("LEGACYCO")
+    calendar._calendar.setdefault(d1, set()).add("LEGACYCO")
+
+    calendar.dedupe()
+
+    legacy_dates = [
+        date for date, syms in calendar._calendar.items()
+        if "LEGACYCO" in syms
+    ]
+    check(
+        "dedupe heals legacy duplicates",
+        legacy_dates == [d1]
+    )
+
     repo.close()
 
 

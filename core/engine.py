@@ -1797,10 +1797,11 @@ class Engine:
     def refresh_results_calendar(self):
         """
         Purge future entries (bad/stale matches) and
-        re-fetch with strict matching.
+        re-fetch with strict matching + dedupe.
         """
         removed = self.results_calendar.clear_future()
         added = self.results_collector.fetch()
+        self.results_calendar.dedupe()
         return removed, added
 
     # --------------------------------------------------
