@@ -31,6 +31,10 @@ class TradeSelectionEngine:
         # Rolling spillovers from recent events
         self._recent_spillovers = []
 
+        # News pipeline health counters
+        self.stories_received = 0
+        self.last_story_time = None
+
     # --------------------------------------------------
 
     def attach_intelligence(
@@ -95,6 +99,15 @@ class TradeSelectionEngine:
 
         news_evidence = self.brain.build_news_evidence()
         print(f"[BRAIN] News Evidence Loaded : {len(news_evidence)}")
+
+        # Pipeline health: prove the Railway → Brain
+        # link is alive (consumed by /news + alarm)
+        if self.brain.pending_stories:
+            from datetime import datetime as _dt
+            self.stories_received += len(
+                self.brain.pending_stories
+            )
+            self.last_story_time = _dt.now()
 
         # ---------------------------------
         # Company Memory : record stories

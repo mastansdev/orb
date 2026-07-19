@@ -119,6 +119,7 @@ class FnOOpportunityEngine:
             "event_type": event.get("event_type", ""),
             "headline": event.get("headline", "")[:120],
             "direction": direction,
+            "prior_move": event.get("prior_move"),
             "importance": importance,
             "confidence": float(
                 event.get("confidence", 0) or 0

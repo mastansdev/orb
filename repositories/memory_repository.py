@@ -139,7 +139,8 @@ class MemoryRepository:
                 horizon TEXT,
                 headline TEXT,
                 story_id TEXT,
-                realized_move REAL
+                realized_move REAL,
+                prior_move REAL
             );
 
             CREATE INDEX IF NOT EXISTS idx_sevents_symbol
@@ -150,6 +151,16 @@ class MemoryRepository:
 
             """)
             self.db.commit()
+
+            # Migration: prior_move on existing DBs
+            try:
+                self.cursor.execute(
+                    "ALTER TABLE structured_events "
+                    "ADD COLUMN prior_move REAL"
+                )
+                self.db.commit()
+            except Exception:
+                pass  # column already exists
 
     # --------------------------------------------------
 
@@ -507,9 +518,9 @@ class MemoryRepository:
                     catalyst, symbol, sector, industry,
                     theme, direction, importance, severity,
                     confidence, horizon, headline, story_id,
-                    realized_move
+                    realized_move, prior_move
                 )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     self._now(),
@@ -528,6 +539,7 @@ class MemoryRepository:
                     event.get("headline", ""),
                     event.get("story_id", ""),
                     None,
+                    event.get("prior_move"),
                 ),
             )
             self.db.commit()
@@ -540,7 +552,7 @@ class MemoryRepository:
                 """
                 SELECT created_at, event_type, catalyst,
                        direction, importance, confidence,
-                       horizon, headline
+                       horizon, headline, prior_move
                 FROM structured_events
                 WHERE symbol = ?
                 ORDER BY id DESC
@@ -560,6 +572,7 @@ class MemoryRepository:
                 "confidence": r[5],
                 "horizon": r[6],
                 "headline": r[7],
+                "prior_move": r[8],
             }
             for r in rows
         ]

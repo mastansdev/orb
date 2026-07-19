@@ -46,9 +46,19 @@ class EventIntelligence:
     # Evidence relevance window for intraday decisions
     EVIDENCE_MAX_AGE_DAYS = 2
 
-    def __init__(self, repository, company_intelligence=None):
+    def __init__(
+        self,
+        repository,
+        company_intelligence=None,
+        price_lookup=None
+    ):
         self.repository = repository
         self.company_intelligence = company_intelligence
+
+        # price_lookup(symbol) → day change % or None.
+        # Captures the PRE-NEWS run-up: the "buy the
+        # rumor" measurement.
+        self.price_lookup = price_lookup
 
         # story_id → processed guard (session dedup)
         self._processed_stories = set()
@@ -109,6 +119,17 @@ class EventIntelligence:
         for symbol in targets:
             event = dict(base)
             event["symbol"] = str(symbol).upper()
+
+            # Priced-in measurement: how much had the
+            # stock ALREADY moved when this news arrived?
+            event["prior_move"] = None
+            if event["symbol"] and self.price_lookup:
+                try:
+                    event["prior_move"] = (
+                        self.price_lookup(event["symbol"])
+                    )
+                except Exception:
+                    pass
 
             if self.repository is not None:
                 try:
@@ -286,6 +307,41 @@ class EventIntelligence:
                     f"{reaction['positive_rate']}% up)"
                 )
                 facts["expected_reaction"] = reaction
+
+            # --------------------------------------
+            # PRICED-IN check (buy rumor, sell news):
+            # positive news on a stock that already
+            # ran up is late — haircut or refuse.
+            # --------------------------------------
+            from config import (
+                PRICED_IN_WARN_PCT,
+                PRICED_IN_FADE_PCT,
+            )
+
+            prior_move = event.get("prior_move")
+
+            if (
+                recommendation == "BUY"
+                and prior_move is not None
+            ):
+                facts["prior_move"] = prior_move
+
+                if prior_move >= PRICED_IN_FADE_PCT:
+                    # Fully priced: no BUY evidence.
+                    recommendation = "WAIT"
+                    importance = importance * 0.3
+                    reason += (
+                        f" | ⚠ FULLY PRICED-IN: already "
+                        f"{prior_move:+.1f}% before news "
+                        f"— fade risk, no chase"
+                    )
+                elif prior_move >= PRICED_IN_WARN_PCT:
+                    importance = importance * 0.5
+                    reason += (
+                        f" | ⚠ partially priced-in "
+                        f"({prior_move:+.1f}% pre-news) "
+                        f"— score halved"
+                    )
 
             evidence_list.append(
                 Evidence(

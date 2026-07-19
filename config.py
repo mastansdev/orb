@@ -166,6 +166,28 @@ SHOCK_BREADTH_PCT = 20       # ≤20% stocks advancing
 SHOCK_AVG_CHANGE = -1.5      # and avg change ≤ -1.5%
 
 # ==========================
+# PRICED-IN DETECTION (buy the rumor, sell the news)
+# ==========================
+
+# If a stock already moved this much BEFORE its news
+# arrived, the news is partially priced → evidence
+# score is halved and tagged.
+PRICED_IN_WARN_PCT = 3.0
+
+# Above this pre-news move, positive news is treated
+# as fully priced → no BUY evidence, no event entry
+# (fade risk).
+PRICED_IN_FADE_PCT = 5.0
+
+# ==========================
+# NEWS PIPELINE MONITOR
+# ==========================
+
+# During market hours, no story from Railway for this
+# long → Telegram alarm (feed break detection).
+NEWS_STALENESS_MINUTES = 45
+
+# ==========================
 # MEMORY / PATTERNS
 # ==========================
 

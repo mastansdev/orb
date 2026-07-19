@@ -254,7 +254,8 @@ class Engine:
         # permanent, per-stock events
         self.event_intelligence = EventIntelligence(
             repository=self.market_memory.repository,
-            company_intelligence=self.company_intelligence
+            company_intelligence=self.company_intelligence,
+            price_lookup=price_engine.get_change
         )
 
         # F&O Opportunity Intelligence : live catalyst
@@ -440,6 +441,11 @@ class Engine:
                 state = self.market_state_engine.compute()
                 self.risk_governor.set_market_state(state)
                 self.shock_responder.check_market(state)
+
+                # News-feed staleness alarm: if Railway
+                # goes silent during market hours, say so
+                # instead of trading blind.
+                self._check_news_staleness(now_wall)
 
             self.monitor.increment("ticks")
             self.monitor.update_last_tick(ltt)
@@ -1207,6 +1213,99 @@ class Engine:
             self.monitor.print_status()
             self.watchdog.check()
 
+    def _check_news_staleness(self, now):
+        from config import NEWS_STALENESS_MINUTES
+
+        if not ("09:20" <= now.strftime("%H:%M") <= "15:30"):
+            return
+
+        last = self.trade_selection_engine.last_story_time
+
+        reference = last or getattr(
+            self, "_session_start", None
+        )
+        if reference is None:
+            self._session_start = now
+            return
+
+        silent_minutes = (
+            now - reference
+        ).total_seconds() / 60
+
+        if silent_minutes < NEWS_STALENESS_MINUTES:
+            return
+
+        if getattr(self, "_staleness_alerted", False):
+            return
+        self._staleness_alerted = True
+
+        self.telegram.send(
+            f"📡 NEWS FEED ALERT\n\n"
+            f"No stories received from Railway for "
+            f"{silent_minutes:.0f} minutes during market "
+            f"hours.\n\n"
+            f"The bot is trading on price evidence only "
+            f"(no news/event/causal input).\n\n"
+            f"Check:\n"
+            f"1. Railway service logs (is it running?)\n"
+            f"2. DATABASE_URL matches between Railway "
+            f"and this bot's .env\n"
+            f"3. /news for pipeline counters"
+        )
+
+    # --------------------------------------------------
+
+    def news_pipeline_report(self):
+        """
+        The full Railway → Brain chain, visible.
+        """
+        ts = self.trade_selection_engine
+
+        last = (
+            ts.last_story_time.strftime("%H:%M:%S")
+            if ts.last_story_time else "NONE this session"
+        )
+
+        # Stories in Postgres today (best effort)
+        db_today = "n/a"
+        try:
+            with self.market_memory.repository._lock:
+                pass  # local memory is separate; postgres below
+            cursor = (
+                self.trade_selection_engine
+                .brain.intelligence_repository.cursor
+            )
+            cursor.execute(
+                "SELECT COUNT(*) FROM market_stories "
+                "WHERE created_at >= %s",
+                (datetime.now().strftime("%Y-%m-%d"),),
+            )
+            db_today = cursor.fetchone()[0]
+        except Exception:
+            pass
+
+        chains = len(self.causal_engine.active_chains)
+        watchlist = len(
+            self.fno_opportunity_engine.get_watchlist()
+        )
+
+        return (
+            "NEWS PIPELINE (Railway → Brain)\n\n"
+            f"1. Stories in DB today   : {db_today}\n"
+            f"2. Stories → Brain       : "
+            f"{ts.stories_received} (this session)\n"
+            f"3. Last story received   : {last}\n"
+            f"4. Structured events     : "
+            f"{self.event_intelligence.events_created}\n"
+            f"5. F&O catalyst watchlist: {watchlist}\n"
+            f"6. Active causal chains  : {chains}\n\n"
+            "Healthy = all numbers grow through the day.\n"
+            "Stories stuck at 0 → check Railway logs +\n"
+            "DATABASE_URL match (Railway vs bot .env)."
+        )
+
+    # --------------------------------------------------
+
     def _event_entry_candidate(self, symbol, security_id, ltt):
         """
         Rule-001: the Brain may enter on a MASSIVE fresh
@@ -1261,6 +1360,17 @@ class Engine:
         ).total_seconds() / 60
 
         if age_minutes > EVENT_ENTRY_FRESH_MINUTES:
+            return None
+
+        # Buy-the-rumor guard: never chase an event
+        # entry on a stock that already ran before
+        # its news arrived.
+        from config import PRICED_IN_FADE_PCT
+        prior_move = entry.get("prior_move")
+        if (
+            prior_move is not None
+            and prior_move >= PRICED_IN_FADE_PCT
+        ):
             return None
 
         return entry

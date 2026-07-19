@@ -1300,6 +1300,76 @@ def test_event_entry_mode():
 
 
 # ==========================================================
+# Priced-in detector (buy rumor / sell news)
+# ==========================================================
+
+def test_priced_in():
+    print("\nPriced-In Detector")
+
+    from repositories.memory_repository import MemoryRepository
+    from intelligence.event_intelligence import EventIntelligence
+    from config import (
+        PRICED_IN_WARN_PCT,
+        PRICED_IN_FADE_PCT,
+    )
+
+    db_file = os.path.join(
+        tempfile.gettempdir(), "test_pricedin.db"
+    )
+    if os.path.exists(db_file):
+        os.remove(db_file)
+
+    repo = MemoryRepository(db_file)
+
+    # price lookup: FRESHCO flat, RUNCO already +6%
+    prices = {"FRESHCO": 0.5, "RUNCO": 6.0, "WARMCO": 3.5}
+
+    ei = EventIntelligence(
+        repository=repo,
+        price_lookup=lambda s: prices.get(s),
+    )
+
+    story = FakeStory(
+        story_id="P1",
+        symbols=["FRESHCO", "RUNCO", "WARMCO"],
+    )
+    events = ei.process_story(story)
+    check("events created for all", len(events) == 3)
+
+    by_symbol = {e["symbol"]: e for e in events}
+    check(
+        "prior move captured",
+        by_symbol["RUNCO"]["prior_move"] == 6.0
+    )
+
+    fresh = ei.build_evidence("FRESHCO")
+    check("fresh news → BUY", fresh[0].recommendation == "BUY")
+
+    run = ei.build_evidence("RUNCO")
+    check(
+        "fully priced → no BUY",
+        run and run[0].recommendation == "WAIT"
+    )
+    check(
+        "fade tagged in reason",
+        "PRICED-IN" in run[0].reason
+    )
+
+    warm = ei.build_evidence("WARMCO")
+    check(
+        "partial priced → still BUY but haircut",
+        warm[0].recommendation == "BUY"
+        and warm[0].score < fresh[0].score
+    )
+    check(
+        "haircut tagged",
+        "priced-in" in warm[0].reason
+    )
+
+    repo.close()
+
+
+# ==========================================================
 # Brain conviction gate (integration)
 # ==========================================================
 
@@ -1345,6 +1415,7 @@ if __name__ == "__main__":
     test_causal_reasoning()
     test_adaptive_and_shock()
     test_event_entry_mode()
+    test_priced_in()
     test_brain_gate()
 
     print()
