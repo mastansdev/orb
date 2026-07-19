@@ -85,6 +85,20 @@ execution_quality_module.ExecutionQuality.FILE_NAME = (
     os.path.join(tempfile.gettempdir(), "smoke_fills.csv")
 )
 
+# 1d. Market recorder isolated (avoids touching the
+#     real session database)
+import core.market_recorder as market_recorder_module
+
+SMOKE_RECORDER = os.path.join(
+    tempfile.gettempdir(), "smoke_recorder.db"
+)
+if os.path.exists(SMOKE_RECORDER):
+    os.remove(SMOKE_RECORDER)
+
+market_recorder_module.MarketRecorder.DB_FILE = (
+    SMOKE_RECORDER
+)
+
 # 2. Position recovery file must not leak a fake paper
 #    position into the real bot on next startup
 RECOVERY_FILE = "open_positions.json"

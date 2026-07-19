@@ -1370,6 +1370,115 @@ def test_priced_in():
 
 
 # ==========================================================
+# Strict Results-Calendar Matching
+# ==========================================================
+
+def test_strict_calendar_matching():
+    print("\nStrict Calendar Matching")
+
+    from repositories.memory_repository import MemoryRepository
+    from intelligence.results_calendar import ResultsCalendar
+    from intelligence.company_intelligence import (
+        CompanyIntelligence,
+    )
+    from collectors.results_calendar_collector import (
+        ResultsCalendarCollector,
+    )
+    from datetime import datetime, timedelta
+
+    db_file = os.path.join(
+        tempfile.gettempdir(), "test_strictcal.db"
+    )
+    if os.path.exists(db_file):
+        os.remove(db_file)
+
+    repo = MemoryRepository(db_file)
+    company = CompanyIntelligence(repository=repo)
+
+    # Synthetic universe with realistic names
+    company.get_profile("BHARATFORG")[
+        "company_name"
+    ] = "Bharat Forge Ltd"
+    company.get_profile("AIAENG")[
+        "company_name"
+    ] = "AIA Engineering Limited"
+    company.get_profile("AIIL")[
+        "company_name"
+    ] = "Authum Investment & Infrastructure Ltd"
+    company.get_profile("ACC")[
+        "company_name"
+    ] = "ACC Limited"
+
+    calendar = ResultsCalendar(repository=repo)
+    collector = ResultsCalendarCollector(
+        results_calendar=calendar,
+        company_intelligence=company,
+    )
+
+    # Exact name matches resolve
+    check(
+        "exact name resolves",
+        collector.resolve_symbol("Bharat Forge Ltd")
+        == "BHARATFORG"
+    )
+    check(
+        "suffix noise ignored",
+        collector.resolve_symbol(
+            "AIA ENGINEERING"
+        ) == "AIAENG"
+    )
+    check(
+        "ticker in row resolves",
+        collector.resolve_symbol("ACC") == "ACC"
+    )
+
+    # The v1 failure mode: similar-ish names must NOT
+    # cross-match
+    check(
+        "no fuzzy cross-match (AIA ≠ AIIL)",
+        collector.resolve_symbol("AIA Engineering")
+        != "AIIL"
+    )
+    check(
+        "unknown company → None",
+        collector.resolve_symbol(
+            "Random Unknown Industries Ltd"
+        ) is None
+    )
+    check(
+        "empty → None",
+        collector.resolve_symbol("") is None
+    )
+
+    # clear_future purges today+, keeps past
+    today = datetime.now().strftime("%Y-%m-%d")
+    tomorrow = (
+        datetime.now() + timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+
+    calendar.add("ACC", today)
+    calendar.add("AIAENG", tomorrow)
+
+    removed = calendar.clear_future()
+    check("clear_future purges", removed == 2)
+    check(
+        "calendar empty after purge",
+        not calendar.has_event_today("ACC")
+    )
+
+    # Weekday report renders
+    calendar.add("BHARATFORG", tomorrow)
+    report = calendar.report()
+    check(
+        "weekday view renders",
+        "BHARATFORG" in report
+        and "WEEK AHEAD" in report
+    )
+
+    repo.close()
+
+
+# ==========================================================
 # Brain conviction gate (integration)
 # ==========================================================
 
@@ -1416,6 +1525,7 @@ if __name__ == "__main__":
     test_adaptive_and_shock()
     test_event_entry_mode()
     test_priced_in()
+    test_strict_calendar_matching()
     test_brain_gate()
 
     print()

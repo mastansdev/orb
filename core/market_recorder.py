@@ -26,6 +26,8 @@ from threading import Lock
 
 class MarketRecorder:
 
+    DB_FILE = "market_recorder.db"
+
     def __init__(self, interval_seconds=1):
         self.lock = Lock()
         self.snapshot_count = 0
@@ -36,7 +38,7 @@ class MarketRecorder:
         self.last_record_time = 0
 
         self.db = sqlite3.connect(
-            "market_recorder.db",
+            self.DB_FILE,
             check_same_thread=False
         )
 

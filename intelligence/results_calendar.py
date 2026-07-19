@@ -219,6 +219,43 @@ class ResultsCalendar:
         return result
 
     # --------------------------------------------------
+    # PUBLIC : Maintenance
+    # --------------------------------------------------
+
+    def clear_future(self):
+        """
+        Purge today-and-future entries (bad matches,
+        stale data) so a strict re-fetch can rebuild
+        cleanly. Past entries (performance history)
+        are kept.
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        removed = 0
+        for date in list(self._calendar.keys()):
+            if date >= today:
+                removed += len(self._calendar[date])
+                del self._calendar[date]
+
+        if self.repository is not None:
+            try:
+                with self.repository._lock:
+                    self.repository.cursor.execute(
+                        "DELETE FROM results_calendar "
+                        "WHERE event_date >= ?",
+                        (today,),
+                    )
+                    self.repository.db.commit()
+            except Exception:
+                pass
+
+        print(
+            f"[CALENDAR] Cleared {removed} future "
+            f"entries"
+        )
+        return removed
+
+    # --------------------------------------------------
     # PUBLIC : Evidence
     # --------------------------------------------------
 
@@ -247,26 +284,55 @@ class ResultsCalendar:
 
     # --------------------------------------------------
 
-    def report(self, days=5):
+    def report(self, days=7):
+        """
+        Week-ahead view, grouped by weekday
+        (Earnings Pulse style).
+        """
         upcoming = self.upcoming(days)
 
         if not upcoming:
             return (
-                "RESULTS CALENDAR\n\n"
-                f"No scheduled events in next {days} days.\n"
-                "Add via /calendar SYMBOL YYYY-MM-DD\n"
-                "or Masterdata/results_calendar.csv"
+                "RESULTS CALENDAR — WEEK AHEAD\n\n"
+                f"No scheduled events in next {days} days.\n\n"
+                "/fetchresults — pull BSE calendar\n"
+                "/calendar REFRESH — purge + refetch\n"
+                "/calendar SYMBOL YYYY-MM-DD — add manually"
             )
 
-        lines = ["RESULTS CALENDAR", ""]
+        lines = ["📅 RESULTS — WEEK AHEAD", ""]
 
         today = datetime.now().strftime("%Y-%m-%d")
 
         for date, symbols in sorted(upcoming.items()):
+            weekday = datetime.strptime(
+                date, "%Y-%m-%d"
+            ).strftime("%A").upper()
+
             marker = " ← TODAY" if date == today else ""
-            lines.append(f"{date}{marker}:")
+
             lines.append(
-                "  " + ", ".join(symbols[:15])
+                f"━ {weekday} {date}{marker} "
+                f"({len(symbols)})"
             )
+
+            shown = symbols[:20]
+            lines.append("  " + ", ".join(shown))
+
+            if len(symbols) > len(shown):
+                lines.append(
+                    f"  … +{len(symbols) - len(shown)} more"
+                )
+
+            lines.append("")
+
+        lines.append(
+            "⚠ Stocks listed TODAY are blocked from "
+            "new entries (binary-event rule). Timing "
+            "note: BSE publishes the DATE only — boards "
+            "meet any time; announcements often land "
+            "mid-session or after close, so the block "
+            "covers the whole day."
+        )
 
         return "\n".join(lines)

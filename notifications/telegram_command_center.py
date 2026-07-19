@@ -484,8 +484,26 @@ class TelegramCommandCenter:
     # ---------------------------------
 
     def cmd_calendar(self, args):
-        # /calendar               → show upcoming
+        # /calendar               → week-ahead view
+        # /calendar REFRESH       → purge + strict refetch
         # /calendar SYMBOL DATE   → add entry
+        if args and args[0].upper() == "REFRESH":
+            self.engine.telegram.send(
+                "📅 Purging future entries and "
+                "re-fetching BSE calendar (strict "
+                "matching)…"
+            )
+            removed, added = (
+                self.engine.refresh_results_calendar()
+            )
+            self.engine.telegram.send(
+                f"📅 Calendar rebuilt: {removed} old "
+                f"entries purged, {added} strict "
+                f"matches added.\n\n"
+                f"{self.engine.calendar_report()}"
+            )
+            return
+
         if len(args) >= 2:
             added = self.engine.calendar_add(
                 args[0], args[1]
@@ -529,7 +547,7 @@ class TelegramCommandCenter:
             "/journal — today's decisions\n"
             "/eod — end of day report\n"
             "/graph SYMBOL — knowledge graph\n"
-            "/calendar [SYMBOL DATE] — results calendar\n"
+            "/calendar [REFRESH | SYMBOL DATE] — results week\n"
             "/edge — edge analysis (net of charges)\n"
             "/execution — slippage / fill quality\n"
             "/causal [SYMBOL] — cause-effect chains\n"

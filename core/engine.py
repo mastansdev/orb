@@ -322,6 +322,7 @@ class Engine:
         self.results_collector = ResultsCalendarCollector(
             results_calendar=self.results_calendar,
             harvester=self.calendar_harvester,
+            company_intelligence=self.company_intelligence,
         )
         _threading.Thread(
             target=self.results_collector.fetch,
@@ -1732,6 +1733,17 @@ class Engine:
 
     def fetch_results_calendar(self):
         return self.results_collector.fetch()
+
+    # --------------------------------------------------
+
+    def refresh_results_calendar(self):
+        """
+        Purge future entries (bad/stale matches) and
+        re-fetch with strict matching.
+        """
+        removed = self.results_calendar.clear_future()
+        added = self.results_collector.fetch()
+        return removed, added
 
     # --------------------------------------------------
 
