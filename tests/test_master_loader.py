@@ -1,4 +1,4 @@
-from price_engine import price_engine
+from intelligence.price_engine import price_engine
 
 price_engine.set_previous_close("INFY", 1800)
 

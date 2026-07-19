@@ -6,8 +6,8 @@ sys.path.insert(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
 
-from capital_manager import CapitalManager
-from position_manager import PositionManager
+from trading.capital_manager import CapitalManager
+from trading.position_manager import PositionManager
 
 
 def test_open_and_confirm_position():

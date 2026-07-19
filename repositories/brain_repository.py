@@ -1,5 +1,5 @@
 from datetime import datetime
-from database import Database
+from repositories.database import Database
 
 
 class BrainRepository:

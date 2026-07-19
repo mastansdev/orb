@@ -1,4 +1,4 @@
-from orb_engine import ORBEngine
+from core.orb_engine import ORBEngine
 
 
 def test_orb_creation():

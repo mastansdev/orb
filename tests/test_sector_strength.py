@@ -1,4 +1,4 @@
-from sector_strength import SectorStrength
+from intelligence.sector_strength import SectorStrength
 
 engine = SectorStrength()
 

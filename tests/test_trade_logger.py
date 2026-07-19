@@ -1,7 +1,7 @@
 import os
 import csv
 
-from trade_logger import TradeLogger
+from trading.trade_logger import TradeLogger
 from config import TRADE_LOG_FILE
 
 print("=" * 60)

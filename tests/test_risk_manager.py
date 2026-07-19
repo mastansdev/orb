@@ -6,7 +6,7 @@ sys.path.insert(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
 
-from risk_manager import RiskManager
+from trading.risk_manager import RiskManager
 from config import RISK_REWARD
 
 

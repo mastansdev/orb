@@ -38,7 +38,7 @@ import feedparser
 import requests
 
 from collectors.base_collector import BaseCollector
-from news_models import (
+from news.news_models import (
     RawNews,
     NewsSource,
     NewsCategory,

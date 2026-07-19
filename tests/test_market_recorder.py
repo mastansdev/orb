@@ -22,7 +22,7 @@ sys.path.append(
     )
 )
 
-from market_recorder import MarketRecorder
+from core.market_recorder import MarketRecorder
 
 
 print()

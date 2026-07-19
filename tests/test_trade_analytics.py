@@ -1,4 +1,4 @@
-from trade_analytics import TradeAnalytics
+from trading.trade_analytics import TradeAnalytics
 
 analytics = TradeAnalytics()
 

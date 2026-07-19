@@ -1,3 +1,3 @@
-from startup_banner import StartupBanner
+from core.startup_banner import StartupBanner
 
 StartupBanner.show(1319)

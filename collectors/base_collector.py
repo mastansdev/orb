@@ -29,7 +29,7 @@ Author : H&M ORB AUTO TRADER
 from abc import ABC, abstractmethod
 from typing import List
 
-from news_models import RawNews
+from news.news_models import RawNews
 
 
 class BaseCollector(ABC):

@@ -1,4 +1,4 @@
-from historical_data import HistoricalData
+from core.historical_data import HistoricalData
 
 h = HistoricalData()
 

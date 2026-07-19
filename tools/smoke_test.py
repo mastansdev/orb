@@ -72,14 +72,14 @@ memory_repo_module.MEMORY_DB_FILE = SMOKE_DB
 
 # 1b. Trade log goes to a temp file too — smoke trades
 #     must never pollute the real edge-analysis data
-import trade_logger as trade_logger_module
+import trading.trade_logger as trade_logger_module
 
 trade_logger_module.TRADE_LOG_FILE = os.path.join(
     tempfile.gettempdir(), "smoke_trade_log.csv"
 )
 
 # 1c. Fills log isolated too
-import execution_quality as execution_quality_module
+import trading.execution_quality as execution_quality_module
 
 execution_quality_module.ExecutionQuality.FILE_NAME = (
     os.path.join(tempfile.gettempdir(), "smoke_fills.csv")
@@ -108,20 +108,20 @@ clean_recovery_file()
 
 # news_engine / brain resolve the class at import time,
 # so make sure they import AFTER the patch.
-import news_engine as news_engine_module
+import news.news_engine as news_engine_module
 news_engine_module.IntelligenceRepository = (
     FakeIntelligenceRepository
 )
 
-import brain as brain_module
+import intelligence.brain as brain_module
 brain_module.IntelligenceRepository = (
     FakeIntelligenceRepository
 )
 
 # ==========================================================
 
-from engine import Engine
-from master_loader import master_loader
+from core.engine import Engine
+from core.master_loader import master_loader
 
 PASSED = 0
 FAILED = 0

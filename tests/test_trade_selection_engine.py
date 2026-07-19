@@ -1,4 +1,4 @@
-from trade_selection_engine import TradeSelectionEngine
+from trading.trade_selection_engine import TradeSelectionEngine
 
 
 def test_score():

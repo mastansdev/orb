@@ -4,7 +4,7 @@ import time
 from dotenv import load_dotenv
 
 from dhanhq import dhanhq, DhanContext
-from instrument_loader import InstrumentLoader
+from core.instrument_loader import InstrumentLoader
 
 load_dotenv()
 

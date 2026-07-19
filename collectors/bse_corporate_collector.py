@@ -32,7 +32,7 @@ from datetime import datetime
 
 from bse import BSE
 
-from news_models import (
+from news.news_models import (
     RawNews,
     NewsSource,
 )

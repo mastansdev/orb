@@ -3,8 +3,8 @@ from collections import deque
 from repositories.intelligence_repository import (
     IntelligenceRepository,
 )
-from news_classifier import NewsClassifier
-from market_story_builder import (
+from news.news_classifier import NewsClassifier
+from news.market_story_builder import (
     MarketStoryBuilder,
 )
 from collectors.bse_corporate_collector import (
@@ -16,10 +16,10 @@ from collectors.news_rss_collector import (
 from collectors.regulatory_collector import (
     RegulatoryCollector,
 )
-from news_models import (
+from news.news_models import (
     ProcessedNews,
 )
-from symbol_matcher import symbol_matcher
+from news.symbol_matcher import symbol_matcher
 
 
 class RailwayNewsEngine:

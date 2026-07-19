@@ -8,13 +8,13 @@ from datetime import datetime
 from dotenv import load_dotenv
 from dhanhq import DhanContext, MarketFeed
 
-from watchlist import get_instruments
-from instrument_loader import InstrumentLoader
-from engine import Engine
-from price_engine import price_engine
-from error_logger import ErrorLogger
-from event_logger import event_logger
-from telegram_command_center import TelegramCommandCenter
+from core.watchlist import get_instruments
+from core.instrument_loader import InstrumentLoader
+from core.engine import Engine
+from intelligence.price_engine import price_engine
+from notifications.error_logger import ErrorLogger
+from notifications.event_logger import event_logger
+from notifications.telegram_command_center import TelegramCommandCenter
 
 load_dotenv()
 

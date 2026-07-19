@@ -1,4 +1,4 @@
-from industry_engine import IndustryEngine
+from intelligence.industry_engine import IndustryEngine
 
 engine = IndustryEngine()
 

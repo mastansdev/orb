@@ -1,211 +1,45 @@
 # ORB AUTO TRADER
 
-## Version
+**Version 2.6.0 — Institutional AI Trading System (Paper)**
 
-**Version:** 1.0.0-PAPER
+An institutional-grade intraday trading system for NSE: evidence-based
+decisions, permanent memory, causal reasoning, independent risk governance —
+with ORB breakouts as the execution trigger.
 
----
-
-# Overview
-
-ORB Auto Trader is an automated Opening Range Breakout (ORB) trading system for the Indian stock market.
-
-The bot:
-
-* Connects to Dhan Market Feed
-* Monitors a dynamic stock universe
-* Builds the 09:15–09:30 Opening Range
-* Detects ORB breakouts
-* Executes paper trades
-* Manages risk automatically
-* Sends Telegram alerts
-* Logs every completed trade
-* Generates trade analytics and daily reports
+> Philosophy: *Evidence contributes; Conviction decides; Risk authorizes;
+> Execution acts.* See `docs/INSTITUTIONAL_TRADING_CONSTITUTION.md`.
 
 ---
 
-# Features
-
-## Trading
-
-* Dynamic Stock Universe
-* Live Market Feed (Dhan)
-* ORB Builder
-* Breakout Detection
-* Paper Trading
-* Risk Management
-* Position Sizing
-
-## Monitoring
-
-* Live Bot Dashboard
-* Watchdog
-* System Health Check
-
-## Notifications
-
-* Startup Alert
-* BUY Alert
-* SELL Alert
-* Daily Telegram Report
-
-## Analytics
-
-* Trade Logger
-* Trade Analytics Dashboard
-
----
-
-# Project Structure
-
-```text
-orb-auto-trader/
-
-├── main.py
-├── market_data.py
-├── engine.py
-├── strategy.py
-├── orb_engine.py
-├── tick_cache.py
-├── risk_manager.py
-├── position_manager.py
-├── paper_execution.py
-├── trade_logger.py
-├── trade_analytics.py
-├── telegram_notifier.py
-├── telegram_daily_report.py
-├── bot_monitor.py
-├── watchdog.py
-├── system_check.py
-├── config.py
-├── trade_log.csv
-├── .env
-├── data/
-├── tests/
-├── logs/
-├── reports/
-└── README.md
-```
-
----
-
-# Environment Variables
-
-Create a `.env` file.
-
-Required variables:
+## Quick Start
 
 ```
-DHAN_CLIENT_ID=
-
-DHAN_ACCESS_TOKEN=
-
-TELEGRAM_BOT_TOKEN=
-
-TELEGRAM_CHAT_ID=
+py run_all_tests.py     # verify everything (should print 6/6)
+py main.py              # start the bot (paper trading)
+py dashboard.py         # live dashboard → http://localhost:8181
 ```
 
----
+Manage via Telegram: `/status /brief /risk /fno /causal /edge /eod` … (24 commands, `/help` lists all).
 
-# Installation
+## Repository Map
 
-Install required packages:
+| Folder | Contents |
+|---|---|
+| `core/` | engine, ORB, candles, strategy, master loader, recorder |
+| `intelligence/` | brain, conviction, evidence, causal reasoning, knowledge graph, memory engines |
+| `news/` | news pipeline: classify → stories → impact |
+| `trading/` | execution, risk governor, positions, portfolio, edge analyzer |
+| `notifications/` | telegram command center, loggers |
+| `collectors/` | RSS, BSE, NSE, SEBI/RBI/PIB feeds |
+| `repositories/` | SQLite memory + Postgres intelligence persistence |
+| `tests/`, `tools/` | test suite, smoke test, forensics |
+| `docs/` | **BOT_KNOWLEDGE_MAP.md** ← start here, constitution, specs |
+| `Masterdata/`, `data/` | stock master, graph edges, calendars, universe |
 
-```bash
-py -m pip install -r requirements.txt
-```
+Full use-case guide: **`docs/BOT_KNOWLEDGE_MAP.md`**
 
----
+## Safety
 
-# Daily Workflow
-
-Before Market
-
-```bash
-py system_check.py
-```
-
-If all checks pass:
-
-```bash
-py main.py
-```
-
----
-
-# During Market
-
-The bot automatically:
-
-* Builds ORB
-* Detects breakouts
-* Executes paper trades
-* Sends Telegram notifications
-* Logs completed trades
-
----
-
-# After Market
-
-View analytics:
-
-```bash
-py test_trade_analytics.py
-```
-
-Send Telegram summary:
-
-```bash
-py test_daily_report.py
-```
-
----
-
-# Telegram Notifications
-
-Supported notifications:
-
-* Bot Started
-* BUY Executed
-* SELL Executed
-* Daily Report
-
----
-
-# Current Status
-
-Version: **1.0.0-PAPER**
-
-Status:
-
-* Paper Trading Ready
-* Awaiting Live Market Validation
-
----
-
-# Future Roadmap
-
-## Version 1.1
-
-* Signal Logger
-* Auto Reconnect
-* Professional Logging
-* Daily Reports Automation
-
-## Version 2.0
-
-* Live Trading
-* Dhan Order Placement
-* Portfolio Tracking
-* News Scanner
-* AI-powered Alerts
-* Sector Strength Analysis
-* Institutional Flow Analysis
-
----
-
-# License
-
-Private Project
-
-Developed for personal automated trading and research.
+Paper mode by default (`TRADING_MODE = "PAPER"`, `ENABLE_ORDER_PLACEMENT = False`).
+Independent Risk Governor with daily-loss kill switch, loss-streak pause,
+portfolio heat and sector caps. Config coherence audit at every startup.

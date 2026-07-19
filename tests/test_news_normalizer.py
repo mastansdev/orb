@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from news_normalizer import NewsNormalizer
+from news.news_normalizer import NewsNormalizer
 
 
 def print_separator():

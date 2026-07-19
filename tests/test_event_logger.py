@@ -1,4 +1,4 @@
-from event_logger import event_logger
+from notifications.event_logger import event_logger
 
 event_logger.system(
     event="TEST_EVENT",

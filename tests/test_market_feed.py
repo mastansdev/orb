@@ -4,7 +4,7 @@ import time
 from dotenv import load_dotenv
 from dhanhq import DhanContext, MarketFeed
 
-from watchlist import get_instruments
+from core.watchlist import get_instruments
 
 load_dotenv()
 

@@ -2,7 +2,7 @@
 
 ## Current Version
 
-**Version:** 2.5.0-INSTITUTIONAL-AI
+**Version:** 2.6.0-INSTITUTIONAL-AI
 
 ---
 
@@ -122,6 +122,19 @@
   graded history ("never reasons from scratch"),
   emitting CAUSAL evidence with the full mechanism as
   explanation; restart-safe; /causal [SYMBOL] command
+
+### Clean Architecture + Dashboard (v2.6)
+
+* Repository reorganized into layer packages: core/,
+  intelligence/, news/, trading/, notifications/ — all
+  imports rewritten and verified; docs consolidated in
+  docs/; 19 dead/empty files deleted
+* docs/BOT_KNOWLEDGE_MAP.md — complete run→result guide
+* Live Dashboard (dashboard.py → http://localhost:8181):
+  live PnL curve, open positions, trade log, PnL-by-hour
+  analysis, conviction-vs-PnL quality scatter (stdlib
+  only, auto-refresh 5s)
+* run_all_tests.py updated (6 suites)
 
 ### Intelligence
 

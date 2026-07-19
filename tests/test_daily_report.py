@@ -1,4 +1,4 @@
-from telegram_daily_report import TelegramDailyReport
+from notifications.telegram_daily_report import TelegramDailyReport
 
 report = TelegramDailyReport()
 

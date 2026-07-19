@@ -1,6 +1,6 @@
 import os
 
-from position_recovery import PositionRecovery
+from trading.position_recovery import PositionRecovery
 
 print("=" * 60)
 print("     ORB AUTO TRADER - POSITION RECOVERY TEST")

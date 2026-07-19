@@ -3,7 +3,7 @@ import time
 
 from dotenv import load_dotenv
 
-from telegram_notifier import TelegramNotifier
+from notifications.telegram_notifier import TelegramNotifier
 
 load_dotenv()
 

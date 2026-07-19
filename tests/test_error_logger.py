@@ -1,4 +1,4 @@
-from error_logger import ErrorLogger
+from notifications.error_logger import ErrorLogger
 
 logger = ErrorLogger()
 

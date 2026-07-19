@@ -1,4 +1,4 @@
-from intelligence_engine import IntelligenceEngine
+from intelligence.intelligence_engine import IntelligenceEngine
 
 engine = IntelligenceEngine()
 

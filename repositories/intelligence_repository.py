@@ -1,8 +1,8 @@
 from datetime import datetime
 
-from database import Database
+from repositories.database import Database
 
-from news_models import MarketStory
+from news.news_models import MarketStory
 
 class IntelligenceRepository:
 

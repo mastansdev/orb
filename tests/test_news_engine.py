@@ -4,7 +4,7 @@ import sys
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
-from news_engine import NewsEngine
+from news.news_engine import NewsEngine
 from collectors.news_rss_collector import NewsRSSCollector
 
 

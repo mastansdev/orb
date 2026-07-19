@@ -1,4 +1,4 @@
-from market_profile import market_profile
+from intelligence.market_profile import market_profile
 
 print(len(market_profile.profile))
 

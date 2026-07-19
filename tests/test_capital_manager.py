@@ -6,7 +6,7 @@ sys.path.insert(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
 
-from capital_manager import CapitalManager
+from trading.capital_manager import CapitalManager
 
 print("=" * 60)
 print("      ORB AUTO TRADER - CAPITAL MANAGER TEST")

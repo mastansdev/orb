@@ -6,7 +6,7 @@ sys.path.insert(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
 
-from strategy import Strategy
+from core.strategy import Strategy
 from config import ENTRY_BUFFER_PCT
 
 

@@ -76,7 +76,7 @@ class FakeTradeController:
 def test_risk_governor():
     print("\nRiskGovernor")
 
-    from risk_governor import RiskGovernor
+    from trading.risk_governor import RiskGovernor
     from config import DAILY_MAX_LOSS, MAX_CONSECUTIVE_LOSSES
 
     capital = FakeCapitalManager()
@@ -163,8 +163,8 @@ def test_risk_governor():
 def test_conviction_engine():
     print("\nConvictionEngine")
 
-    from conviction_engine import ConvictionEngine
-    from evidence import Evidence
+    from intelligence.conviction_engine import ConvictionEngine
+    from intelligence.evidence import Evidence
 
     engine = ConvictionEngine()
 
@@ -229,7 +229,7 @@ def test_memory():
     print("\nMemoryRepository + MarketMemory")
 
     from repositories.memory_repository import MemoryRepository
-    from market_memory import MarketMemory
+    from intelligence.market_memory import MarketMemory
 
     db_file = os.path.join(
         tempfile.gettempdir(), "test_inst_memory.db"
@@ -296,8 +296,8 @@ def test_pattern_engine():
     print("\nPatternEngine")
 
     from repositories.memory_repository import MemoryRepository
-    from market_memory import MarketMemory
-    from pattern_engine import PatternEngine
+    from intelligence.market_memory import MarketMemory
+    from intelligence.pattern_engine import PatternEngine
     from config import MAX_ORB_FAILURES_PER_DAY
 
     db_file = os.path.join(
@@ -355,7 +355,7 @@ def test_company_intelligence():
     print("\nCompanyIntelligence")
 
     from repositories.memory_repository import MemoryRepository
-    from company_intelligence import CompanyIntelligence
+    from intelligence.company_intelligence import CompanyIntelligence
 
     db_file = os.path.join(
         tempfile.gettempdir(), "test_inst_company.db"
@@ -450,9 +450,9 @@ def test_event_and_fno():
     print("\nEventIntelligence + FnOOpportunityEngine")
 
     from repositories.memory_repository import MemoryRepository
-    from event_intelligence import EventIntelligence
-    from fno_opportunity_engine import FnOOpportunityEngine
-    from company_intelligence import CompanyIntelligence
+    from intelligence.event_intelligence import EventIntelligence
+    from intelligence.fno_opportunity_engine import FnOOpportunityEngine
+    from intelligence.company_intelligence import CompanyIntelligence
 
     db_file = os.path.join(
         tempfile.gettempdir(), "test_inst_events.db"
@@ -585,8 +585,8 @@ def test_knowledge_graph():
     print("\nKnowledgeGraph")
 
     from repositories.memory_repository import MemoryRepository
-    from company_intelligence import CompanyIntelligence
-    from knowledge_graph import KnowledgeGraph
+    from intelligence.company_intelligence import CompanyIntelligence
+    from intelligence.knowledge_graph import KnowledgeGraph
 
     db_file = os.path.join(
         tempfile.gettempdir(), "test_inst_graph.db"
@@ -666,7 +666,7 @@ def test_results_calendar():
     print("\nResultsCalendar")
 
     from repositories.memory_repository import MemoryRepository
-    from results_calendar import ResultsCalendar
+    from intelligence.results_calendar import ResultsCalendar
     from datetime import datetime
 
     db_file = os.path.join(
@@ -713,7 +713,7 @@ def test_results_calendar():
 def test_dynamic_trade_manager():
     print("\nDynamicTradeManager")
 
-    from dynamic_trade_manager import DynamicTradeManager
+    from trading.dynamic_trade_manager import DynamicTradeManager
     from config import (
         PARTIAL_BOOK_AT_R,
         TRAIL_AFTER_R,
@@ -793,7 +793,7 @@ def test_priority_upgrades():
     print("\nPriority Upgrades")
 
     # --- Edge Analyzer on a synthetic log ---
-    from edge_analyzer import EdgeAnalyzer
+    from trading.edge_analyzer import EdgeAnalyzer
 
     log = os.path.join(
         tempfile.gettempdir(), "test_edge_log.csv"
@@ -841,7 +841,7 @@ def test_priority_upgrades():
     )
 
     # --- Risk coherence audit ---
-    from risk_governor import RiskGovernor
+    from trading.risk_governor import RiskGovernor
 
     warnings, facts = RiskGovernor.coherence_audit()
     check(
@@ -887,7 +887,7 @@ def test_priority_upgrades():
     )
 
     # Expected reaction speaks only with enough samples
-    from event_intelligence import EventIntelligence
+    from intelligence.event_intelligence import EventIntelligence
     ei = EventIntelligence(repository=repo)
     reaction = ei.expected_reaction("ORDER_WIN")
     check(
@@ -900,8 +900,8 @@ def test_priority_upgrades():
     )
 
     # --- Calendar harvester ---
-    from calendar_harvester import CalendarHarvester
-    from results_calendar import ResultsCalendar
+    from intelligence.calendar_harvester import CalendarHarvester
+    from intelligence.results_calendar import ResultsCalendar
     from datetime import datetime, timedelta
 
     calendar = ResultsCalendar(repository=repo)
@@ -945,7 +945,7 @@ def test_priority_upgrades():
     )
 
     # --- Execution quality ---
-    from execution_quality import ExecutionQuality
+    from trading.execution_quality import ExecutionQuality
 
     fills = os.path.join(
         tempfile.gettempdir(), "test_fills.csv"
@@ -991,9 +991,9 @@ def test_causal_reasoning():
     print("\nCausalReasoningEngine")
 
     from repositories.memory_repository import MemoryRepository
-    from company_intelligence import CompanyIntelligence
-    from causal_reasoning_engine import CausalReasoningEngine
-    from causal_knowledge import CAUSAL_MODELS
+    from intelligence.company_intelligence import CompanyIntelligence
+    from intelligence.causal_reasoning_engine import CausalReasoningEngine
+    from intelligence.causal_knowledge import CAUSAL_MODELS
 
     check(
         "knowledge base loaded (30+ models)",
@@ -1142,7 +1142,7 @@ def test_brain_gate():
     print("\nBrain Conviction Gate (unit-level)")
 
     # Verify PATTERN evidence flows into negative strength
-    from evidence import Evidence
+    from intelligence.evidence import Evidence
 
     avoid = Evidence(
         provider="PATTERN",
