@@ -51,6 +51,8 @@ class TelegramCommandCenter:
             "/edge": self.cmd_edge,
             "/execution": self.cmd_execution,
             "/causal": self.cmd_causal,
+            "/decay": self.cmd_decay,
+            "/shockmodel": self.cmd_shockmodel,
             "/news": self.cmd_news,
             "/profile": self.cmd_profile,
             "/market": self.cmd_market,
@@ -417,6 +419,21 @@ class TelegramCommandCenter:
         symbol = args[0].upper() if args else None
         self.engine.telegram.send(
             f"🧩 {self.engine.causal_report(symbol)}"
+        )
+
+    # ---------------------------------
+
+    def cmd_decay(self, args):
+        event_type = args[0].upper() if args else None
+        self.engine.telegram.send(
+            f"📉 {self.engine.decay_report(event_type)}"
+        )
+
+    # ---------------------------------
+
+    def cmd_shockmodel(self, args):
+        self.engine.telegram.send(
+            f"📉 {self.engine.decay_report()}"
         )
 
     # ---------------------------------

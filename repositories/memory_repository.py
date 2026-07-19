@@ -162,6 +162,18 @@ class MemoryRepository:
             except Exception:
                 pass  # column already exists
 
+            # Migration: abnormal_move (market-adjusted
+            # reaction — the TRUE event impact, and the
+            # input to the reaction-decay model)
+            try:
+                self.cursor.execute(
+                    "ALTER TABLE structured_events "
+                    "ADD COLUMN abnormal_move REAL"
+                )
+                self.db.commit()
+            except Exception:
+                pass
+
     # --------------------------------------------------
 
     @staticmethod
@@ -651,16 +663,26 @@ class MemoryRepository:
 
     # --------------------------------------------------
 
-    def write_event_outcomes(self, price_change_lookup):
+    def write_event_outcomes(
+        self,
+        price_change_lookup,
+        market_change=None
+    ):
         """
         Outcome write-back: for today's structured
-        events that have a symbol but no realized
-        move yet, record the symbol's day change.
+        events, record:
+          • realized_move  = the symbol's raw day change
+          • abnormal_move  = realized_move − market_change
+            (the TRUE, market-adjusted event impact —
+            the event-study measure and the input to the
+            reaction-decay model)
 
         price_change_lookup(symbol) → % change or None.
+        market_change → the market's avg day change %
+            (e.g. breadth avg). If None, abnormal = raw.
 
-        This is what turns event memory into
-        PREDICTIVE memory.
+        This is what turns event memory into PREDICTIVE
+        memory.
         """
         updated = 0
 
@@ -686,14 +708,23 @@ class MemoryRepository:
             if change is None:
                 continue
 
+            change = round(float(change), 2)
+
+            abnormal = change
+            if market_change is not None:
+                abnormal = round(
+                    change - float(market_change), 2
+                )
+
             with self._lock:
                 self.cursor.execute(
                     """
                     UPDATE structured_events
-                    SET realized_move = ?
+                    SET realized_move = ?,
+                        abnormal_move = ?
                     WHERE id = ?
                     """,
-                    (round(float(change), 2), event_id),
+                    (change, abnormal, event_id),
                 )
             updated += 1
 
@@ -702,6 +733,65 @@ class MemoryRepository:
                 self.db.commit()
 
         return updated
+
+    # --------------------------------------------------
+
+    def event_type_abnormal_series(self, event_type, limit=60):
+        """
+        Chronological series of abnormal (market-adjusted)
+        moves for one event type — OLDEST first. This is
+        the raw input to the reaction-decay model:
+        'is each successive shock of this type getting
+        smaller as the market anticipates it?'
+        """
+        with self._lock:
+            self.cursor.execute(
+                """
+                SELECT trade_date, symbol, direction,
+                       abnormal_move
+                FROM structured_events
+                WHERE event_type = ?
+                  AND abnormal_move IS NOT NULL
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (event_type, limit),
+            )
+            rows = self.cursor.fetchall()
+
+        return [
+            {
+                "trade_date": r[0],
+                "symbol": r[1],
+                "direction": r[2],
+                "abnormal_move": r[3],
+            }
+            for r in rows
+        ]
+
+    # --------------------------------------------------
+
+    def known_event_types(self, min_samples=3):
+        """
+        Event types with enough graded abnormal moves to
+        model reaction decay.
+        """
+        with self._lock:
+            self.cursor.execute(
+                """
+                SELECT event_type, COUNT(*)
+                FROM structured_events
+                WHERE abnormal_move IS NOT NULL
+                GROUP BY event_type
+                HAVING COUNT(*) >= ?
+                ORDER BY COUNT(*) DESC
+                """,
+                (min_samples,),
+            )
+            return [
+                {"event_type": r[0], "samples": r[1]}
+                for r in self.cursor.fetchall()
+            ]
 
     # --------------------------------------------------
 

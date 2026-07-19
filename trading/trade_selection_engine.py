@@ -221,6 +221,32 @@ class TradeSelectionEngine:
                         symbol
                     )
                 )
+
+                # Reaction-decay scaling: a recurring
+                # catalyst the market has learned to
+                # anticipate carries LESS conviction than
+                # a first-of-kind shock (1st big, 2nd
+                # smaller). Scale each event's score by
+                # its event-type decay multiplier.
+                if (
+                    self.reaction_decay is not None
+                    and event_evidence
+                ):
+                    for ev in event_evidence:
+                        etype = ev.facts.get("event_type")
+                        if not etype:
+                            continue
+                        mult = self.reaction_decay.multiplier(
+                            etype
+                        )
+                        if mult < 1.0:
+                            ev._data["score"] = round(
+                                ev.score * mult, 1
+                            )
+                            ev._data["reason"] += (
+                                f" | decay ×{mult} "
+                                f"(shock priced-in over time)"
+                            )
             except Exception as e:
                 print(f"[EVENT] {e}")
 

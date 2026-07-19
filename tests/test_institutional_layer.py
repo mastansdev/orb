@@ -1594,6 +1594,110 @@ def test_leverage_and_profiles():
 
 
 # ==========================================================
+# Reaction Decay (1st shock big, 2nd smaller)
+# ==========================================================
+
+def test_reaction_decay():
+    print("\nReaction Decay Engine")
+
+    from repositories.memory_repository import MemoryRepository
+    from intelligence.reaction_decay import ReactionDecayEngine
+
+    db_file = os.path.join(
+        tempfile.gettempdir(), "test_decay.db"
+    )
+    if os.path.exists(db_file):
+        os.remove(db_file)
+
+    repo = MemoryRepository(db_file)
+    engine = ReactionDecayEngine(repository=repo)
+
+    def add_event(etype, abnormal):
+        # Insert a graded structured event directly
+        with repo._lock:
+            repo.cursor.execute(
+                """
+                INSERT INTO structured_events(
+                    created_at, trade_date, event_type,
+                    symbol, direction, importance,
+                    confidence, abnormal_move
+                ) VALUES(?,?,?,?,?,?,?,?)
+                """,
+                (repo._now(), repo._today(), etype,
+                 "X", "NEGATIVE", 70, 80, abnormal),
+            )
+            repo.db.commit()
+
+    # Insufficient history → neutral
+    check(
+        "insufficient → multiplier 1.0",
+        engine.multiplier("USFDA_WARNING") == 1.0
+    )
+
+    # DECAYING type: big first shocks, small recent ones
+    for a in [-8.0, -7.5, -6.0, -3.0, -2.0, -1.0]:
+        add_event("USFDA_WARNING", a)
+
+    model = engine.model("USFDA_WARNING")
+    check("decay: enough samples", model["samples"] == 6)
+    check("decay: detected DECAYING", model["status"] == "DECAYING")
+    check(
+        "decay: first > recent",
+        model["first_mean"] > model["recent_mean"]
+    )
+    check(
+        "decay: multiplier below 1",
+        model["multiplier"] < 1.0
+    )
+    check(
+        "decay: multiplier above floor",
+        model["multiplier"] >= engine.DECAY_FLOOR
+    )
+    check(
+        "decay: expected magnitude computed",
+        model["expected_magnitude"] is not None
+    )
+
+    # STABLE type: reactions stay large (never anticipated)
+    for a in [-5.0, -5.5, -4.8, -5.2, -5.1, -6.0]:
+        add_event("SURPRISE_FRAUD", a)
+
+    stable = engine.model("SURPRISE_FRAUD")
+    check("stable: not decaying", stable["status"] == "STABLE")
+    check("stable: full weight", stable["multiplier"] == 1.0)
+
+    # Reports render
+    check(
+        "decay report renders",
+        "DECAYING" in engine.report("USFDA_WARNING")
+        or "decaying" in engine.report("USFDA_WARNING")
+    )
+    check(
+        "shock model overview renders",
+        "SHOCK DECAY MODEL" in engine.report()
+    )
+
+    # write_event_outcomes computes abnormal = raw - market
+    repo.save_structured_event({
+        "event_type": "ORDER_WIN",
+        "symbol": "ABNCO",
+        "importance": 60,
+    })
+    updated = repo.write_event_outcomes(
+        lambda s: 5.0 if s == "ABNCO" else None,
+        market_change=2.0,   # market up 2%
+    )
+    check("abnormal write-back ran", updated == 1)
+    series = repo.event_type_abnormal_series("ORDER_WIN")
+    check(
+        "abnormal = raw - market (5 - 2 = 3)",
+        series and series[0]["abnormal_move"] == 3.0
+    )
+
+    repo.close()
+
+
+# ==========================================================
 # Brain conviction gate (integration)
 # ==========================================================
 
@@ -1642,6 +1746,7 @@ if __name__ == "__main__":
     test_priced_in()
     test_strict_calendar_matching()
     test_leverage_and_profiles()
+    test_reaction_decay()
     test_brain_gate()
 
     print()

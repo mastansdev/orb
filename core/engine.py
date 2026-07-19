@@ -70,6 +70,7 @@ from intelligence.results_calendar import ResultsCalendar
 from trading.dynamic_trade_manager import DynamicTradeManager
 from intelligence.causal_reasoning_engine import CausalReasoningEngine
 from intelligence.market_state_engine import market_state_engine
+from intelligence.reaction_decay import ReactionDecayEngine
 from trading.shock_responder import ShockResponder
 from collectors.results_calendar_collector import (
     ResultsCalendarCollector,
@@ -317,6 +318,17 @@ class Engine:
         self.causal_engine = CausalReasoningEngine(
             company_intelligence=self.company_intelligence,
             repository=self.market_memory.repository
+        )
+
+        # Reaction Decay Engine : learns that repeated
+        # shocks of the same type shrink as the market
+        # anticipates them (1st shock big, 2nd smaller).
+        self.reaction_decay = ReactionDecayEngine(
+            repository=self.market_memory.repository
+        )
+        # Share with trade selection for evidence scaling
+        self.trade_selection_engine.reaction_decay = (
+            self.reaction_decay
         )
 
         # Market State + Shock Responder
@@ -1727,6 +1739,11 @@ class Engine:
 
     # --------------------------------------------------
 
+    def decay_report(self, event_type=None):
+        return self.reaction_decay.report(event_type)
+
+    # --------------------------------------------------
+
     def profile_report(self):
         from config import (
             CAPITAL_PROFILE,
@@ -1998,14 +2015,47 @@ class Engine:
             )
 
         # Event outcome write-back: grade today's
-        # structured events with realized day moves —
-        # this is what makes event memory predictive.
+        # structured events with realized day moves AND
+        # market-adjusted ABNORMAL moves (the true event
+        # impact) — this feeds both predictive memory and
+        # the reaction-decay model.
+        market_avg = None
+        try:
+            state = self.market_state_engine.compute()
+            market_avg = state.get("avg_change")
+        except Exception:
+            pass
+
         graded = self.event_intelligence.write_outcomes(
-            price_engine.get_change
+            price_engine.get_change,
+            market_change=market_avg
         )
         lines.append(
-            f"Event outcomes graded: {graded}."
+            f"Event outcomes graded: {graded} "
+            f"(market-adjusted, mkt {market_avg}%)."
         )
+
+        # Show any event types whose shock is now decaying
+        try:
+            decaying = []
+            for t in (
+                self.market_memory.repository
+                .known_event_types()
+            ):
+                m = self.reaction_decay.model(
+                    t["event_type"]
+                )
+                if m["status"] == "DECAYING":
+                    decaying.append(
+                        f"{m['event_type']} ×{m['multiplier']}"
+                    )
+            if decaying:
+                lines.append(
+                    "Shock decay detected: "
+                    + ", ".join(decaying[:5])
+                )
+        except Exception:
+            pass
 
         return "\n".join(lines)
 
