@@ -191,6 +191,10 @@ class Engine:
         self.strategy = Strategy()
         self.position_manager = PositionManager(capital_manager=self.capital_manager)
         self.execution = Execution()
+        from trading.option_leg import OptionLeg
+        # Additive ATM option leg — rides alongside the equity entry,
+        # never modifies it. Telegram is attached after it is created below.
+        self.option_leg = OptionLeg(self.execution)
         self.broker_sync = BrokerSync()
         self.risk_manager = RiskManager()
         from config import MAX_OPEN_POSITIONS
@@ -228,6 +232,8 @@ class Engine:
             os.getenv("TELEGRAM_BOT_TOKEN"),
             os.getenv("TELEGRAM_CHAT_ID")
         )
+        # Give the option leg a handle to Telegram for entry/exit alerts
+        self.option_leg.telegram = self.telegram
 
         # --------------------------------------------------
         # Risk Governor — independent risk authority.
@@ -616,6 +622,12 @@ class Engine:
                 entry_mode = "ORB"
                 signal = False
 
+                # Manage open option legs every tick: Greeks-aware premium
+                # trailing stop (ratchets up, never gives back), hard stop,
+                # optional target, and same-day time stop. Cheap no-op when
+                # nothing is open; polling is throttled internally.
+                self.option_leg.manage(ltt)
+
                 if orb is not None:
                     last_closed_candle = (
                         self.candle_engine.get_latest(symbol)
@@ -997,6 +1009,21 @@ class Engine:
                     self._entered_today.add(symbol)
                     self.position_recovery.save(self.trades)
 
+                    # --------------------------------------------------
+                    # ADDITIVE ATM OPTION LEG (1 lot, nearest monthly)
+                    #
+                    # Buys the ATM CALL alongside the equity position on the
+                    # same breakout. Fully self-contained and exception-safe:
+                    # a failure here can never affect the equity trade above.
+                    # --------------------------------------------------
+                    self.option_leg.try_enter(
+                        symbol=symbol,
+                        direction="CE",           # long breakout -> ATM CALL
+                        underlying_ltp=ltp,
+                        entry_time=ltt,
+                        parent_security_id=security_id,
+                    )
+
                     # Permanent decision memory: WHY we entered
                     try:
                         reasons = getattr(
@@ -1283,6 +1310,9 @@ class Engine:
                     self.position_manager.close_position(security_id, pnl)
                     self.open_position_manager.remove(security_id)
                     del self.trades[security_id]
+
+                    # ADDITIVE: close the linked ATM option leg with the equity
+                    self.option_leg.exit_for_parent(security_id, reason=result)
                     
                     if self.trades:
                         self.position_recovery.save(self.trades)

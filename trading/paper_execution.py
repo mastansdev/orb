@@ -6,7 +6,7 @@ class PaperExecution:
     def __init__(self):
         self.execution_quality = ExecutionQuality()
 
-    def buy(self, security_id, symbol, price, qty):
+    def buy(self, security_id, symbol, price, qty, segment=None):
 
         self.execution_quality.record(
             mode="PAPER",
@@ -24,6 +24,7 @@ class PaperExecution:
         print("===================================")
         print(f"Symbol      : {symbol}")
         print(f"Security ID : {security_id}")
+        print(f"Segment     : {segment or 'NSE_EQ'}")
         print(f"Entry Price : {price}")
         print(f"Quantity    : {qty}")
         print("===================================\n")
@@ -34,7 +35,7 @@ class PaperExecution:
         "message": "Paper order executed successfully."
     }
 
-    def sell(self, security_id, symbol, price, qty):
+    def sell(self, security_id, symbol, price, qty, segment=None):
 
         self.execution_quality.record(
             mode="PAPER",
@@ -52,6 +53,7 @@ class PaperExecution:
         print("===================================")
         print(f"Symbol      : {symbol}")
         print(f"Security ID : {security_id}")
+        print(f"Segment     : {segment or 'NSE_EQ'}")
         print(f"Exit Price  : {price}")
         print(f"Quantity    : {qty}")
         print("===================================\n")

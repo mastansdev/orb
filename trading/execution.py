@@ -36,14 +36,16 @@ class Execution:
         security_id,
         symbol,
         price,
-        qty
+        qty,
+        segment=None
     ):
 
         return self.executor.buy(
             security_id,
             symbol,
             price,
-            qty
+            qty,
+            segment=segment
         )
 
     # --------------------------------------------------
@@ -53,12 +55,14 @@ class Execution:
         security_id,
         symbol,
         price,
-        qty
+        qty,
+        segment=None
     ):
 
         return self.executor.sell(
             security_id,
             symbol,
             price,
-            qty
+            qty,
+            segment=segment
         )

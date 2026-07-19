@@ -296,6 +296,32 @@ PRODUCT_TYPE = "MIS"      # MIS / CNC / MTF
 BROKER = "DHAN"
 
 # ==========================
+# ATM OPTION LEG (additive)
+# ==========================
+# On every confirmed breakout entry the bot ALSO buys 1 lot of the
+# nearest-monthly ATM option (CE on breakout), IN ADDITION to the equity
+# position. The equity trade is never changed or replaced.
+ENABLE_OPTION_LEG = True            # master switch for the option leg
+OPTION_LOTS = 1                     # lots per breakout (1 lot = 1x contract lot size)
+OPTION_EXPIRY_PREF = "MONTHLY"      # MONTHLY (nearest monthly) — per strategy choice
+OPTION_EXIT_WITH_EQUITY = True      # backstop: also close the leg if its equity exits first
+OPTION_TIME_STOP = "15:10"          # force-close any open leg past this (IST) — no overnight
+SCRIP_MASTER_PATH = "data/api-scrip-master.csv"   # source of option contracts
+
+# ---- Greeks-aware premium exit management (independent of the equity) ----
+# An option's P&L is driven by delta/gamma/theta/vega + time-to-expiry, all of
+# which are already embedded in the live traded premium. So we manage the real
+# premium: a ratcheting trailing stop that only moves UP (never gives profit
+# back), a hard initial stop, an optional hard target, and a same-day time stop
+# (so multi-day theta never accrues). Greeks are captured for context/logging.
+OPTION_INDEPENDENT_EXIT = True      # manage the leg on its own premium (recommended)
+OPTION_INITIAL_STOP_PCT = 25.0      # hard stop: exit if premium falls 25% below entry
+OPTION_TRAIL_ACTIVATE_PCT = 20.0    # arm the trailing stop once premium is +20% in profit
+OPTION_TRAIL_GIVEBACK_PCT = 15.0    # trail 15% below the PEAK premium; the stop never widens
+OPTION_TARGET_PCT = 0.0             # 0 = disabled; else hard take-profit at +X% premium
+OPTION_POLL_SECONDS = 5             # min seconds between premium/greeks polls per leg
+
+# ==========================
 # TEST
 # ==========================
 TEST_MODE = False

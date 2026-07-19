@@ -17,3 +17,14 @@ logs/
 .vscode/
 # Windows shortcuts
 *.lnk
+
+# FUSE mount / deleted-file artifacts
+.fuse_hidden*
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor temp
+*.swp
+*~

@@ -73,6 +73,19 @@ class LiveExecution:
 
     # ---------------------------------------------------------
 
+    def _resolve_segment(self, segment):
+        """
+        Map a segment label to the Dhan exchange-segment constant.
+        Default is NSE equity (the existing stock path). Options must pass
+        "NSE_FNO" so orders route to the F&O segment, not the cash market.
+        """
+        s = (str(segment).upper() if segment else "NSE_EQ")
+        if s in ("NSE_FNO", "FNO", "NFO", "OPTION", "OPTIONS"):
+            return dhan.NSE_FNO
+        return dhan.NSE
+
+    # ---------------------------------------------------------
+
     def _validate_order(
         self,
         security_id,
@@ -175,12 +188,16 @@ class LiveExecution:
         security_id,
         symbol,
         qty,
-        price=0
+        price=0,
+        segment=None
     ):
         """
         Consolidated order wrapper handling SDK
         handshakes, retries, price mapping, fill
         confirmation, and slippage capture.
+
+        `segment` selects the exchange segment: default NSE equity, or
+        "NSE_FNO" for option/future orders.
         """
         try:
             self._validate_order(
@@ -188,6 +205,8 @@ class LiveExecution:
                 symbol,
                 qty
             )
+
+            exchange_segment = self._resolve_segment(segment)
 
             order_type = self._get_order_type()
 
@@ -212,7 +231,7 @@ class LiveExecution:
                 try:
                     response = dhan.place_order(
                         security_id=str(security_id),
-                        exchange_segment=dhan.NSE,
+                        exchange_segment=exchange_segment,
                         transaction_type=transaction_type,
                         quantity=int(qty),
                         order_type=order_type,
@@ -319,7 +338,8 @@ class LiveExecution:
         security_id,
         symbol,
         price,
-        qty
+        qty,
+        segment=None
     ):
         return self._execute(
             transaction_type=dhan.BUY,
@@ -327,7 +347,8 @@ class LiveExecution:
             security_id=security_id,
             symbol=symbol,
             qty=qty,
-            price=price
+            price=price,
+            segment=segment
         )
 
     # ---------------------------------------------------------
@@ -337,7 +358,8 @@ class LiveExecution:
         security_id,
         symbol,
         price,
-        qty
+        qty,
+        segment=None
     ):
         return self._execute(
             transaction_type=dhan.SELL,
@@ -345,5 +367,6 @@ class LiveExecution:
             security_id=security_id,
             symbol=symbol,
             qty=qty,
-            price=price
+            price=price,
+            segment=segment
         )
