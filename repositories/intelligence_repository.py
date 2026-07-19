@@ -245,6 +245,29 @@ class IntelligenceRepository:
     
     # --------------------------------------------------
 
+    def recent_stories(self, hours=48, limit=40):
+        """
+        Most recent market stories from the DB (regardless
+        of session read-cursor) — the actual news currently
+        'around the market'. Used by the pre-market brief.
+        """
+        try:
+            self.cursor.execute(
+                """
+                SELECT *
+                FROM market_stories
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = self.cursor.fetchall()
+            return [self._row_to_story(r) for r in rows]
+        except Exception:
+            return []
+
+    # --------------------------------------------------
+
     def load_new_intelligence(self):
 
         self.cursor.execute(

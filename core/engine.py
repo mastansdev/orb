@@ -1805,7 +1805,13 @@ class Engine:
         market may react this way" report that grows
         sharper every trading day.
         """
-        lines = ["🌅 PRE-MARKET INTELLIGENCE BRIEF", ""]
+        from datetime import datetime as _dt
+
+        lines = [
+            "🌅 PRE-MARKET INTELLIGENCE BRIEF",
+            _dt.now().strftime("%a %d %b %Y %H:%M"),
+            "",
+        ]
 
         # 1. Risk state
         risk = self.risk_status()
@@ -1816,14 +1822,66 @@ class Engine:
             f"| Day loss cap ₹{risk['daily_max_loss']:,.0f}"
         )
 
-        # 2. Results today (block + hunt)
+        # 2. Latest NEWS around the market (pulled live
+        #    from the news DB — this is the "these news
+        #    are around" part, available even at cold
+        #    start / pre-open).
+        try:
+            stories = (
+                self.trade_selection_engine.brain
+                .intelligence_repository.recent_stories(
+                    limit=25
+                )
+            )
+            # Prefer stories that map to our universe
+            mapped = [
+                s for s in stories
+                if getattr(s, "affected_symbols", None)
+            ]
+            shown = mapped or stories
+
+            if shown:
+                lines.append("")
+                lines.append(
+                    f"📰 NEWS AROUND THE MARKET "
+                    f"({len(shown)} recent):"
+                )
+                for s in shown[:8]:
+                    syms = getattr(
+                        s, "affected_symbols", []
+                    ) or []
+                    tag = (
+                        f" → {', '.join(syms[:3])}"
+                        if syms else ""
+                    )
+                    sector = getattr(s, "sector", "") or ""
+                    lines.append(
+                        f"• {getattr(s, 'name', '')[:70]}"
+                        f"{tag}"
+                        + (f" [{sector}]" if sector else "")
+                    )
+            else:
+                lines.append("")
+                lines.append(
+                    "📰 No recent stories in the news DB. "
+                    "Check /news (is the Railway service "
+                    "running + DATABASE_URL matched?)."
+                )
+        except Exception as e:
+            lines.append("")
+            lines.append(
+                f"📰 News DB unavailable ({str(e)[:50]}). "
+                "Check /news."
+            )
+
+        # 3. Results watchlist — today, or NEXT results day
         try:
             wl = self.results_watchlist
             wl.rebuild()
-            watching = [
+            watching = sorted(
                 s for s, e in wl.today.items()
                 if e["state"] == "WATCHING"
-            ]
+            )
             if watching:
                 lines.append("")
                 lines.append(
@@ -1831,22 +1889,36 @@ class Engine:
                     f"entries BLOCKED pre-result, hunted "
                     f"AFTER announcement:"
                 )
-                lines.append(
-                    "  " + ", ".join(sorted(watching)[:20])
-                )
+                lines.append("  " + ", ".join(watching[:20]))
+            else:
+                # Show the next upcoming results day
+                upcoming = self.results_calendar.upcoming(7)
+                today_str = _dt.now().strftime("%Y-%m-%d")
+                future = {
+                    d: s for d, s in upcoming.items()
+                    if d > today_str
+                }
+                if future:
+                    nxt = sorted(future.keys())[0]
+                    names = future[nxt]
+                    lines.append("")
+                    lines.append(
+                        f"📊 No results today. Next: {nxt} "
+                        f"({len(names)} stocks)"
+                    )
+                    lines.append("  " + ", ".join(names[:15]))
         except Exception:
             pass
 
-        # 3. Active causal chains (news → effect)
+        # 4. Active causal chains (news → effect)
         try:
             chains = self.causal_engine.active_chains
             if chains:
                 lines.append("")
                 lines.append(
-                    f"🧩 ACTIVE CAUSAL CHAINS "
-                    f"({len(chains)}) — news already in "
-                    f"the system and how it should move "
-                    f"stocks:"
+                    f"🧩 CAUSAL CHAINS ACTIVE "
+                    f"({len(chains)}) — how current news "
+                    f"should move stocks:"
                 )
                 seen = set()
                 for c in sorted(
@@ -1910,13 +1982,16 @@ class Engine:
         except Exception:
             pass
 
-        if len(lines) <= 3:
+        # Header is 3 lines (title, date, blank) + risk.
+        # If nothing else attached, memory is still cold.
+        if len(lines) <= 5:
             lines.append("")
             lines.append(
-                "Memory is still building. This brief "
-                "sharpens with every trading day — after "
-                "~200 days it will pre-empt the market's "
-                "likely reaction from history."
+                "Learned-reaction memory is still building "
+                "(needs recurring graded events). The news "
+                "and results sections above are live now; "
+                "the historical 'market may react this way' "
+                "layer sharpens over ~200 trading days."
             )
 
         return "\n".join(lines)
