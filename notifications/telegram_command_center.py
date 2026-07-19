@@ -51,6 +51,9 @@ class TelegramCommandCenter:
             "/edge": self.cmd_edge,
             "/execution": self.cmd_execution,
             "/causal": self.cmd_causal,
+            "/market": self.cmd_market,
+            "/fetchresults": self.cmd_fetch_results,
+            "/shock": self.cmd_shock,
         }
 
     # ---------------------------------
@@ -416,6 +419,49 @@ class TelegramCommandCenter:
 
     # ---------------------------------
 
+    def cmd_market(self, args):
+        self.engine.telegram.send(
+            f"🌡️ {self.engine.market_report()}"
+        )
+
+    # ---------------------------------
+
+    def cmd_fetch_results(self, args):
+        self.engine.telegram.send(
+            "📅 Fetching BSE results calendar…"
+        )
+        added = self.engine.fetch_results_calendar()
+        self.engine.telegram.send(
+            f"📅 Results calendar updated: "
+            f"{added} entries added.\n\n"
+            f"{self.engine.calendar_report()}"
+        )
+
+    # ---------------------------------
+
+    def cmd_shock(self, args):
+        # Operator red button — requires CONFIRM
+        if not args or args[0].upper() != "CONFIRM":
+            self.engine.telegram.send(
+                "🚨 SHOCK RESPONSE requires "
+                "confirmation.\n\n"
+                "Send:  /shock CONFIRM\n\n"
+                "This will EXIT ALL positions, disable "
+                "entries, and send weakest-sector PE "
+                "recommendations."
+            )
+            return
+
+        status = self.engine.trigger_shock(
+            "OPERATOR TRIGGERED via /shock"
+        )
+        self.engine.telegram.send(
+            f"🚨 Shock response executed at "
+            f"{status['time']}."
+        )
+
+    # ---------------------------------
+
     def cmd_graph(self, args):
         if not args:
             self.engine.telegram.send(
@@ -478,7 +524,10 @@ class TelegramCommandCenter:
             "/calendar [SYMBOL DATE] — results calendar\n"
             "/edge — edge analysis (net of charges)\n"
             "/execution — slippage / fill quality\n"
-            "/causal [SYMBOL] — cause-effect chains\n\n"
+            "/causal [SYMBOL] — cause-effect chains\n"
+            "/market — regime + adaptive limits\n"
+            "/fetchresults — refresh BSE results calendar\n"
+            "/shock CONFIRM — emergency flatten + PE setup\n\n"
             "/pause\n"
             "/resume\n\n"
             "/tradingoff\n"

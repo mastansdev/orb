@@ -69,6 +69,11 @@ from intelligence.knowledge_graph import KnowledgeGraph
 from intelligence.results_calendar import ResultsCalendar
 from trading.dynamic_trade_manager import DynamicTradeManager
 from intelligence.causal_reasoning_engine import CausalReasoningEngine
+from intelligence.market_state_engine import market_state_engine
+from trading.shock_responder import ShockResponder
+from collectors.results_calendar_collector import (
+    ResultsCalendarCollector,
+)
 
 from intelligence.intelligence_context import IntelligenceContext
 
@@ -187,7 +192,10 @@ class Engine:
         self.execution = Execution()
         self.broker_sync = BrokerSync()
         self.risk_manager = RiskManager()
-        self.portfolio_risk_manager = PortfolioRiskManager()
+        from config import MAX_OPEN_POSITIONS
+        self.portfolio_risk_manager = PortfolioRiskManager(
+            max_open_trades=MAX_OPEN_POSITIONS
+        )
         self.allocation_trigger_engine = AllocationTriggerEngine()
         self.capital_allocation_engine = CapitalAllocationEngine()
         # ---------------------------------
@@ -289,6 +297,37 @@ class Engine:
             repository=self.market_memory.repository
         )
 
+        # Market State + Shock Responder
+        self.market_state_engine = market_state_engine
+        self._last_state_check = None
+
+        self.shock_responder = ShockResponder(
+            trade_controller=self.trade_controller,
+            sector_engine=self.sector_engine,
+            company_intelligence=self.company_intelligence,
+            telegram=self.telegram,
+        )
+        # Governor shock guards flow into the responder
+        self.risk_governor.shock_callback = (
+            self.shock_responder.trigger
+        )
+
+        # Event-driven entry session state
+        self._entered_today = set()
+
+        # Auto-populate results calendar in background
+        # (network must never delay startup)
+        import threading as _threading
+        self.results_collector = ResultsCalendarCollector(
+            results_calendar=self.results_calendar,
+            harvester=self.calendar_harvester,
+        )
+        _threading.Thread(
+            target=self.results_collector.fetch,
+            daemon=True,
+            name="ResultsCalendarFetch",
+        ).start()
+
         self.trade_selection_engine.attach_intelligence(
             pattern_engine=self.pattern_engine,
             company_intelligence=self.company_intelligence,
@@ -382,6 +421,26 @@ class Engine:
 
             self.capital_manager.set_floating_mtm(total_mtm)
 
+            # --------------------------------------------------
+            # Shock Guards + Adaptive Limits
+            # --------------------------------------------------
+            day_pnl = self.capital_manager.pnl() + total_mtm
+            self.risk_governor.on_tick(day_pnl)
+
+            # Throttled market-state refresh (every 30s):
+            # regime drives the governor's daily limits
+            # and the shock responder's breadth check.
+            now_wall = datetime.now()
+            if (
+                self._last_state_check is None
+                or (now_wall - self._last_state_check)
+                .total_seconds() >= 30
+            ):
+                self._last_state_check = now_wall
+                state = self.market_state_engine.compute()
+                self.risk_governor.set_market_state(state)
+                self.shock_responder.check_market(state)
+
             self.monitor.increment("ticks")
             self.monitor.update_last_tick(ltt)
             self.watchdog.tick_received()
@@ -410,10 +469,17 @@ class Engine:
             completed = self.orb_engine.completed_count()
             self.monitor.set_orb_completed(completed)
 
-            if orb is None:
-                return
-
             trade = self.trades.get(security_id)
+
+            # NOTE: orb may be None (early session).
+            # Exits must still process, and event-driven
+            # entries may proceed without an ORB.
+            if orb is None and trade is None:
+                event_probe = self._event_entry_candidate(
+                    symbol, security_id, ltt
+                )
+                if event_probe is None:
+                    return
 
             # --------------------------------------------------
             # Broker Synchronization
@@ -479,22 +545,50 @@ class Engine:
                 if self.risk_governor.locked:
                     return
 
-                last_closed_candle = self.candle_engine.get_latest(symbol)
-                signal = self.strategy.is_buy_signal(orb, ltt, last_closed_candle)
+                # --------------------------------------------------
+                # ENTRY SIGNAL : ORB breakout OR event catalyst
+                # --------------------------------------------------
+                entry_mode = "ORB"
+                signal = False
+
+                if orb is not None:
+                    last_closed_candle = (
+                        self.candle_engine.get_latest(symbol)
+                    )
+                    signal = self.strategy.is_buy_signal(
+                        orb, ltt, last_closed_candle
+                    )
+
+                event_candidate = None
+                if not signal:
+                    event_candidate = (
+                        self._event_entry_candidate(
+                            symbol, security_id, ltt
+                        )
+                    )
+                    if event_candidate is not None:
+                        signal = True
+                        entry_mode = "EVENT"
 
                 if signal:
-                    print("\n========== LIVE ORB CANDIDATE ==========")
+                    print(f"\n========== LIVE {entry_mode} CANDIDATE ==========")
                     print(f"Symbol      : {symbol}")
                     print(f"Time        : {ltt}")
                     print(f"LTP         : {ltp:.2f}")
-                    print(f"ORB High    : {orb['high']:.2f}")
-                    print(f"ORB Low     : {orb['low']:.2f}")
-                    print(f"Signal      : {signal}")
+                    if orb is not None:
+                        print(f"ORB High    : {orb['high']:.2f}")
+                        print(f"ORB Low     : {orb['low']:.2f}")
+                    if event_candidate is not None:
+                        print(
+                            f"Catalyst    : "
+                            f"{event_candidate.get('headline', '')[:70]}"
+                        )
                     print("========================================\n")
 
                     intelligence = self.intelligence_engine.get(symbol)
                     decision = self.trade_selection_engine.evaluate(
-                        symbol, ltp, orb, intelligence
+                        symbol, ltp, orb, intelligence,
+                        entry_mode=entry_mode
                     )
 
                     # --- Issue 1 Fix: Defensive None-Guard Exception Handling ---
@@ -556,9 +650,31 @@ class Engine:
                     if brain is None:
                         print(f"❌ No Brain decision available for {symbol}")
                         return
-                    
+
+                    # Event entries carry a HIGHER
+                    # conviction bar than ORB entries.
+                    if entry_mode == "EVENT":
+                        from config import (
+                            EVENT_ENTRY_MIN_CONVICTION,
+                        )
+                        conviction_now = getattr(
+                            brain.opportunity,
+                            "conviction", 0
+                        )
+                        if (
+                            conviction_now
+                            < EVENT_ENTRY_MIN_CONVICTION
+                        ):
+                            print(
+                                f"❌ EVENT ENTRY BAR: "
+                                f"{symbol} conviction "
+                                f"{conviction_now:.1f} < "
+                                f"{EVENT_ENTRY_MIN_CONVICTION}"
+                            )
+                            return
+
                     portfolio_decision = self.portfolio_risk_manager.can_take_trade(
-                        opportunity=brain.opportunity 
+                        opportunity=brain.opportunity
                         )
 
                     self.decision_audit.record_portfolio_decision(
@@ -566,13 +682,75 @@ class Engine:
                         portfolio_decision=portfolio_decision
                     )
 
+                    # --------------------------------------------------
+                    # POSITION REPLACEMENT : a stronger
+                    # candidate evicts the weakest open
+                    # position (book full).
+                    # --------------------------------------------------
+                    if (
+                        portfolio_decision.allowed
+                        and portfolio_decision.action == "REPLACE"
+                        and portfolio_decision.replacement_candidate
+                    ):
+                        from config import (
+                            POSITION_REPLACEMENT_ENABLED,
+                        )
+                        if not POSITION_REPLACEMENT_ENABLED:
+                            self.monitor.increment(
+                                "portfolio_rejected"
+                            )
+                            return
+
+                        weakest = (
+                            portfolio_decision
+                            .replacement_candidate
+                        )
+
+                        for sid_w, trade_w in (
+                            self.trades.items()
+                        ):
+                            if (
+                                trade_w.get("symbol")
+                                == weakest.symbol
+                            ):
+                                trade_w["force_exit"] = True
+                                self.portfolio_risk_manager.remove_trade(
+                                    weakest.symbol
+                                )
+                                print(
+                                    f"♻️ REPLACING "
+                                    f"{weakest.symbol} "
+                                    f"(conviction "
+                                    f"{weakest.conviction:.1f}) "
+                                    f"with {symbol}"
+                                )
+                                self.telegram.send(
+                                    f"♻️ POSITION REPLACEMENT\n\n"
+                                    f"Out : {weakest.symbol} "
+                                    f"(weakest, conviction "
+                                    f"{weakest.conviction:.1f})\n"
+                                    f"In  : {symbol} "
+                                    f"({entry_mode} candidate)"
+                                )
+                                break
+
                     if not portfolio_decision.allowed:
                         self.monitor.increment("portfolio_rejected")
                         return
 
                     self.monitor.increment("signals")
 
-                    stop_loss = orb["low"] - ORB_BUFFER
+                    # Stop: ORB structure when available,
+                    # else percentage stop (event entry
+                    # before the range exists).
+                    if orb is not None and orb.get("low"):
+                        stop_loss = orb["low"] - ORB_BUFFER
+                    else:
+                        from config import EVENT_ENTRY_STOP_PCT
+                        stop_loss = round(
+                            ltp * (1 - EVENT_ENTRY_STOP_PCT / 100),
+                            2
+                        )
 
                     qty = self.position_manager.open_position(
                         security_id, symbol, ltp, stop_loss
@@ -679,7 +857,11 @@ class Engine:
                     new_trade["entry_time"] = ltt
                     new_trade["entry_date"] = datetime.now().strftime("%Y-%m-%d")
                     new_trade["capital_used"] = round(qty * ltp, 2)
-                    new_trade["orb"] = {"high": orb["high"], "low": orb["low"]}
+                    new_trade["orb"] = (
+                        {"high": orb["high"], "low": orb["low"]}
+                        if orb is not None else {}
+                    )
+                    new_trade["entry_mode"] = entry_mode
                     new_trade["decision"] = decision
 
                     # --------------------------------------------------
@@ -747,13 +929,17 @@ class Engine:
 
                     self.open_position_manager.add(security_id, new_trade)
                     self.orb_engine.set_entry_taken(security_id)
+                    self._entered_today.add(symbol)
                     self.position_recovery.save(self.trades)
 
             # ---------------------------------
             # POSITION EXIT PIPELINE
             # ---------------------------------
             else:
-                if self.trade_controller.is_exit_all_requested():
+                if trade.get("force_exit"):
+                    # Position replacement / shock eviction
+                    result = self.EXIT_SYSTEM
+                elif self.trade_controller.is_exit_all_requested():
                     result = self.EXIT_MANUAL
                 else:
                     result = self.risk_manager.update(trade, ltp, ltt)
@@ -1020,6 +1206,66 @@ class Engine:
             self.market_recorder.record(**self.system_snapshot())
             self.monitor.print_status()
             self.watchdog.check()
+
+    def _event_entry_candidate(self, symbol, security_id, ltt):
+        """
+        Rule-001: the Brain may enter on a MASSIVE fresh
+        catalyst without waiting for an ORB breakout —
+        any time from open until the global 15:14 cutoff.
+
+        Returns the watchlist entry or None.
+        """
+        from config import (
+            EVENT_ENTRY_ENABLED,
+            EVENT_ENTRY_MIN_IMPORTANCE,
+            EVENT_ENTRY_FRESH_MINUTES,
+            ENTRY_CUTOFF_TIME,
+        )
+
+        if not EVENT_ENTRY_ENABLED:
+            return None
+
+        # Global hard cutoff (MIS)
+        if ltt >= ENTRY_CUTOFF_TIME + ":00":
+            return None
+
+        if ltt < "09:16:00":
+            return None
+
+        if symbol in self._entered_today:
+            return None
+
+        if security_id in self.trades:
+            return None
+
+        entry = self.fno_opportunity_engine.watchlist.get(
+            symbol
+        )
+
+        if entry is None:
+            return None
+
+        if entry["importance"] < EVENT_ENTRY_MIN_IMPORTANCE:
+            return None
+
+        direction = str(
+            entry.get("direction", "")
+        ).upper()
+        if direction in (
+            "WEAKENING", "CONTRADICTED", "NEGATIVE"
+        ):
+            return None
+
+        age_minutes = (
+            datetime.now() - entry["added_at"]
+        ).total_seconds() / 60
+
+        if age_minutes > EVENT_ENTRY_FRESH_MINUTES:
+            return None
+
+        return entry
+
+    # --------------------------------------------------
 
     def get_tick(self, security_id):
         return self.tick_cache.get(security_id)
@@ -1349,6 +1595,42 @@ class Engine:
 
     # --------------------------------------------------
 
+    def market_report(self):
+        state = self.market_state_engine.compute()
+        self.risk_governor.set_market_state(state)
+
+        report = self.market_state_engine.report()
+
+        risk = self.risk_governor.status()
+        report += (
+            f"\n\nAdaptive Limits ({risk['regime']}):\n"
+            f"Max Loss   : ₹{risk['daily_max_loss']:,.0f}\n"
+            f"Max Profit : ₹{risk['daily_max_profit']:,.0f}\n"
+            f"Day Peak   : ₹{risk['day_peak']:,.0f}"
+        )
+
+        shock = self.shock_responder.status()
+        if shock["triggered"]:
+            report += (
+                f"\n\n🚨 SHOCK FIRED {shock['time']}: "
+                f"{shock['reason'][:80]}"
+            )
+
+        return report
+
+    # --------------------------------------------------
+
+    def fetch_results_calendar(self):
+        return self.results_collector.fetch()
+
+    # --------------------------------------------------
+
+    def trigger_shock(self, reason):
+        self.shock_responder.trigger(reason)
+        return self.shock_responder.status()
+
+    # --------------------------------------------------
+
     def edge_report(self):
         from trading.edge_analyzer import EdgeAnalyzer
         return EdgeAnalyzer().report()
@@ -1477,6 +1759,62 @@ class Engine:
         lines.append(
             f"Sector memory updated ({recorded} sectors)."
         )
+
+        # Results-day performance memory: every stock
+        # that reported today gets its day move recorded
+        # permanently (builds per-stock results behaviour)
+        results_recorded = 0
+        try:
+            from datetime import datetime as _dt
+            today = _dt.now().strftime("%Y-%m-%d")
+            today_symbols = (
+                self.results_calendar.upcoming(0)
+                .get(today, [])
+            )
+
+            for sym in today_symbols:
+                change = price_engine.get_change(sym)
+                if change is None:
+                    continue
+
+                direction = (
+                    "POSITIVE" if change > 0.5 else
+                    "NEGATIVE" if change < -0.5 else
+                    "NEUTRAL"
+                )
+
+                self.market_memory.repository.save_structured_event({
+                    "event_type": "RESULTS_DAY",
+                    "catalyst": "RESULTS",
+                    "symbol": sym,
+                    "direction": direction,
+                    "importance": 60,
+                    "confidence": 90,
+                    "horizon": "SHORT",
+                    "headline": (
+                        f"{sym} results day: "
+                        f"closed {change:+.2f}%"
+                    ),
+                })
+
+                self.company_intelligence.record_event(
+                    symbol=sym,
+                    event_type="RESULTS_DAY",
+                    headline=(
+                        f"Results day close {change:+.2f}%"
+                    ),
+                    source="CALENDAR",
+                    payload={"day_change": change},
+                )
+                results_recorded += 1
+        except Exception as results_error:
+            print(f"[EOD] Results memory: {results_error}")
+
+        if results_recorded:
+            lines.append(
+                f"Results-day performance recorded: "
+                f"{results_recorded} stock(s)."
+            )
 
         # Event outcome write-back: grade today's
         # structured events with realized day moves —

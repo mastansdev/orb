@@ -1,4 +1,8 @@
-from config import ENTRY_BUFFER_PCT, MAX_BREAKOUT_PERCENT
+from config import (
+    ENTRY_BUFFER_PCT,
+    MAX_BREAKOUT_PERCENT,
+    ENTRY_CUTOFF_TIME,
+)
 
 
 class Strategy:
@@ -19,7 +23,8 @@ class Strategy:
         if orb["entry_taken"]:
             return False
 
-        if current_time >= "15:00:00":
+        # Global entry cutoff (MIS hard rule)
+        if current_time >= ENTRY_CUTOFF_TIME + ":00":
             return False
 
         if orb["high"] <= orb["low"]:

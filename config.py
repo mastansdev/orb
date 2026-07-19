@@ -110,6 +110,62 @@ TRAIL_DISTANCE_R = 0.75
 RESULTS_DAY_BLOCK = True
 
 # ==========================
+# EVENT-DRIVEN ENTRY (Brain override — Rule-001)
+# ==========================
+
+# Massive catalysts can trigger entry WITHOUT waiting
+# for an ORB breakout, any time before the cutoff.
+EVENT_ENTRY_ENABLED = True
+EVENT_ENTRY_MIN_IMPORTANCE = 75     # watchlist catalyst strength
+EVENT_ENTRY_MIN_CONVICTION = 65     # higher bar than ORB entries
+EVENT_ENTRY_FRESH_MINUTES = 45      # catalyst must be this fresh
+EVENT_ENTRY_STOP_PCT = 1.2          # stop % when no ORB exists yet
+
+# When the book is full, a stronger candidate REPLACES
+# the weakest open position (advantage handled by
+# PortfolioRiskManager.min_replacement_advantage).
+POSITION_REPLACEMENT_ENABLED = True
+
+# ==========================
+# ADAPTIVE DAILY LIMITS (Brain-controlled risk)
+# ==========================
+
+# DAILY_MAX_LOSS / DAILY_MAX_PROFIT above become BASE
+# values; the governor scales them with market regime.
+ADAPTIVE_LIMITS_ENABLED = True
+
+# Regime multipliers (loss_mult, profit_mult)
+REGIME_LIMIT_MULTIPLIERS = {
+    "TRENDING_UP":   (1.0, 3.0),
+    "TRENDING_DOWN": (0.6, 1.0),
+    "BEARISH":       (0.5, 0.8),
+    "CHOPPY":        (0.7, 1.0),
+    "FLAT":          (0.8, 1.0),
+    "WARMUP":        (1.0, 1.0),
+}
+
+# ==========================
+# SHOCK PROTECTION
+# ==========================
+
+# Peak-giveback guard (the +53k → -1.4L lesson):
+# once day profit exceeds the floor, giving back this
+# fraction of the peak = market reversal → exit all.
+PEAK_GUARD_MIN_PROFIT = 8000
+PEAK_GIVEBACK_PCT = 0.40
+
+# Fast-drop guard: PnL falling this much within the
+# window = shock → exit all.
+FAST_DROP_RUPEES = 6000
+FAST_DROP_WINDOW_MINUTES = 10
+
+# Market-wide shock responder (breadth collapse →
+# flatten + weakest-sector PE recommendation)
+SHOCK_RESPONDER_ENABLED = True
+SHOCK_BREADTH_PCT = 20       # ≤20% stocks advancing
+SHOCK_AVG_CHANGE = -1.5      # and avg change ≤ -1.5%
+
+# ==========================
 # MEMORY / PATTERNS
 # ==========================
 
@@ -207,7 +263,7 @@ ENABLE_AUTO_EXIT = True
 ENABLE_TELEGRAM_CONFIRMATION = True
 
 
-ENTRY_CUTOFF_TIME = "15:00"
+ENTRY_CUTOFF_TIME = "15:14"   # GLOBAL hard rule: no new entries after this (MIS)
 
 HARD_EXIT_TIME = "15:15"
 

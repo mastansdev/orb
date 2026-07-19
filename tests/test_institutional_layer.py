@@ -1135,6 +1135,171 @@ def test_causal_reasoning():
 
 
 # ==========================================================
+# Adaptive Limits + Shock Guards + Market State
+# ==========================================================
+
+def test_adaptive_and_shock():
+    print("\nAdaptive Limits + Shock Guards")
+
+    from trading.risk_governor import RiskGovernor
+    from config import (
+        DAILY_MAX_LOSS,
+        PEAK_GUARD_MIN_PROFIT,
+        PEAK_GIVEBACK_PCT,
+    )
+
+    governor = RiskGovernor(
+        FakeCapitalManager(), FakeTradeController(), None
+    )
+
+    # Regime adaptation
+    governor.set_market_state({"regime": "BEARISH"})
+    check(
+        "bearish tightens loss limit",
+        governor.daily_max_loss < DAILY_MAX_LOSS
+    )
+
+    governor.set_market_state({"regime": "TRENDING_UP"})
+    check(
+        "trending restores loss limit",
+        governor.daily_max_loss == DAILY_MAX_LOSS
+    )
+    check(
+        "trending expands profit room",
+        governor.daily_max_profit > DAILY_MAX_LOSS
+    )
+
+    # Peak-giveback shock
+    shock_fired = []
+    governor2 = RiskGovernor(
+        FakeCapitalManager(), FakeTradeController(), None
+    )
+    governor2.shock_callback = (
+        lambda reason: shock_fired.append(reason)
+    )
+
+    peak = PEAK_GUARD_MIN_PROFIT + 2000
+    governor2.on_tick(peak)
+    check("peak tracked", governor2.day_peak_pnl == peak)
+
+    # Small dip: no shock
+    governor2.on_tick(peak * (1 - PEAK_GIVEBACK_PCT / 2))
+    check("small giveback tolerated", not governor2.locked)
+
+    # Big giveback: shock
+    governor2.on_tick(peak * (1 - PEAK_GIVEBACK_PCT) - 1)
+    check("giveback fires kill switch", governor2.locked)
+    check("shock callback invoked", len(shock_fired) == 1)
+    check(
+        "reason mentions giveback",
+        "GIVEBACK" in governor2.lock_reason
+    )
+
+    # Market state classification
+    from intelligence.market_state_engine import (
+        MarketStateEngine,
+    )
+    from intelligence.price_engine import price_engine
+
+    engine = MarketStateEngine()
+
+    # Simulate a bearish tape on real price engine
+    symbols = list(price_engine.prices.keys())[:100]
+    for sym in symbols:
+        price_engine.prices[sym]["previous_close"] = 100.0
+        price_engine.prices[sym]["ltp"] = 98.0
+        price_engine.prices[sym]["change"] = -2.0
+
+    state = engine.compute()
+    check(
+        "bearish tape classified",
+        state["regime"] in ("BEARISH", "TRENDING_DOWN")
+    )
+
+    # Shock responder triggers on breadth collapse
+    from trading.shock_responder import ShockResponder
+    from intelligence.company_intelligence import (
+        CompanyIntelligence,
+    )
+
+    controller = FakeTradeController()
+    responder = ShockResponder(
+        trade_controller=controller,
+        sector_engine=None,
+        company_intelligence=CompanyIntelligence(
+            repository=None
+        ),
+        telegram=None,
+    )
+
+    fired = responder.check_market(
+        {"breadth_pct": 10, "avg_change": -2.5}
+    )
+    check("breadth collapse triggers responder", fired)
+    check("responder exits all", controller.exit_all)
+    check("responder disables entries", not controller.entries)
+
+    # Only once per session
+    controller.exit_all = False
+    fired2 = responder.check_market(
+        {"breadth_pct": 5, "avg_change": -3.0}
+    )
+    check("responder fires once", not fired2)
+
+    # Reset price engine state for other tests
+    for sym in symbols:
+        price_engine.prices[sym]["previous_close"] = None
+        price_engine.prices[sym]["change"] = 0.0
+
+
+# ==========================================================
+# Event-driven entry mode (selection-level)
+# ==========================================================
+
+def test_event_entry_mode():
+    print("\nEvent Entry Mode")
+
+    from trading.trade_selection_engine import (
+        TradeSelectionEngine,
+    )
+
+    # EVENT mode must bypass the ORB structure gate;
+    # ORB mode must still enforce it.
+    engine = TradeSelectionEngine.__new__(
+        TradeSelectionEngine
+    )
+    # Only what _score_orb path needs
+    weak_orb = {"high": 100.2, "low": 100.0}
+
+    result = TradeSelectionEngine._score_orb(
+        engine, weak_orb
+    )
+    check("weak ORB fails structure gate", not result["passed"])
+
+    # Strategy honors global cutoff
+    from core.strategy import Strategy
+    from config import ENTRY_CUTOFF_TIME
+
+    s = Strategy()
+    orb = {
+        "high": 100, "low": 95,
+        "completed": True, "entry_taken": False,
+    }
+    candle = {"close": 100.5}
+
+    check(
+        "entry allowed before cutoff",
+        s.is_buy_signal(orb, "14:59:00", candle) is True
+    )
+    check(
+        f"entry blocked after {ENTRY_CUTOFF_TIME}",
+        s.is_buy_signal(
+            orb, ENTRY_CUTOFF_TIME + ":01", candle
+        ) is False
+    )
+
+
+# ==========================================================
 # Brain conviction gate (integration)
 # ==========================================================
 
@@ -1178,6 +1343,8 @@ if __name__ == "__main__":
     test_dynamic_trade_manager()
     test_priority_upgrades()
     test_causal_reasoning()
+    test_adaptive_and_shock()
+    test_event_entry_mode()
     test_brain_gate()
 
     print()

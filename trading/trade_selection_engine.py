@@ -64,22 +64,27 @@ class TradeSelectionEngine:
         symbol,
         ltp,
         orb,
-        intelligence
+        intelligence,
+        entry_mode="ORB"
     ):
         self.breakouts += 1
 
         # ---------------------------------
         # Structural ORB Validation (Early Gate)
+        # EVENT entries (Rule-001 catalyst override)
+        # bypass the ORB structure gate — their gate
+        # is the higher conviction bar downstream.
         # ---------------------------------
-        orb_result = self._score_orb(orb)
-        if not orb_result["passed"]:
-            self.skipped += 1
-            return self._build_decision(
-                selected=False,
-                score=0,
-                reasons=[orb_result["reason"]],
-                brain_decision=None
-            )
+        if entry_mode != "EVENT":
+            orb_result = self._score_orb(orb)
+            if not orb_result["passed"]:
+                self.skipped += 1
+                return self._build_decision(
+                    selected=False,
+                    score=0,
+                    reasons=[orb_result["reason"]],
+                    brain_decision=None
+                )
 
         # ---------------------------------
         # Institutional Decision Pipeline

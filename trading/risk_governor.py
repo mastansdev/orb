@@ -70,6 +70,22 @@ class RiskGovernor:
         self.telegram = telegram
 
         # ---------------------------------
+        # Adaptive Daily Limits
+        # (Brain-controlled: scaled by regime)
+        # ---------------------------------
+        self.daily_max_loss = DAILY_MAX_LOSS
+        self.daily_max_profit = DAILY_MAX_PROFIT
+        self.current_regime = "WARMUP"
+        self.limit_reason = "base config"
+
+        # ---------------------------------
+        # Shock Guards
+        # ---------------------------------
+        self.day_peak_pnl = 0.0
+        self._pnl_window = []       # (datetime, pnl)
+        self.shock_callback = None  # set by Engine
+
+        # ---------------------------------
         # Kill Switch State
         # ---------------------------------
         self.locked = False
@@ -147,6 +163,135 @@ class RiskGovernor:
         self._notify(message)
 
     # --------------------------------------------------
+    # PUBLIC : Adaptive Limits (Brain control)
+    # --------------------------------------------------
+
+    def set_market_state(self, state):
+        """
+        Called by the Engine with the live market
+        regime. Daily limits follow the market:
+        trending days earn more room, hostile days
+        get tightened.
+        """
+        from config import (
+            ADAPTIVE_LIMITS_ENABLED,
+            REGIME_LIMIT_MULTIPLIERS,
+        )
+
+        if not ADAPTIVE_LIMITS_ENABLED:
+            return
+
+        regime = state.get("regime", "WARMUP")
+
+        if regime == self.current_regime:
+            return
+
+        loss_mult, profit_mult = (
+            REGIME_LIMIT_MULTIPLIERS.get(
+                regime, (1.0, 1.0)
+            )
+        )
+
+        old_loss = self.daily_max_loss
+
+        self.current_regime = regime
+        self.daily_max_loss = round(
+            DAILY_MAX_LOSS * loss_mult, 0
+        )
+        self.daily_max_profit = round(
+            DAILY_MAX_PROFIT * profit_mult, 0
+        )
+        self.limit_reason = (
+            f"{regime} regime "
+            f"(loss ×{loss_mult}, profit ×{profit_mult})"
+        )
+
+        if old_loss != self.daily_max_loss:
+            print(
+                f"[RISK] Limits adapted → {regime}: "
+                f"loss ₹{self.daily_max_loss:.0f}, "
+                f"profit ₹{self.daily_max_profit:.0f}"
+            )
+
+    # --------------------------------------------------
+    # PUBLIC : Per-Tick Shock Guards
+    # --------------------------------------------------
+
+    def on_tick(self, day_pnl):
+        """
+        Called every tick with current day PnL.
+        Fires the kill switch on:
+          1. Peak giveback  (+53k → collapse pattern)
+          2. Fast drop      (shock within N minutes)
+        """
+        from config import (
+            PEAK_GUARD_MIN_PROFIT,
+            PEAK_GIVEBACK_PCT,
+            FAST_DROP_RUPEES,
+            FAST_DROP_WINDOW_MINUTES,
+        )
+
+        if self.locked or not RISK_GOVERNOR_ENABLED:
+            return
+
+        now = datetime.now()
+
+        # Track peak
+        if day_pnl > self.day_peak_pnl:
+            self.day_peak_pnl = day_pnl
+
+        # 1. Peak-giveback guard
+        if self.day_peak_pnl >= PEAK_GUARD_MIN_PROFIT:
+            floor = self.day_peak_pnl * (
+                1 - PEAK_GIVEBACK_PCT
+            )
+            if day_pnl <= floor:
+                self._fire_shock(
+                    f"PROFIT GIVEBACK: peak "
+                    f"₹{self.day_peak_pnl:,.0f} → "
+                    f"₹{day_pnl:,.0f} "
+                    f"(gave back "
+                    f"{PEAK_GIVEBACK_PCT:.0%}) — "
+                    f"market reversal"
+                )
+                return
+
+        # 2. Fast-drop guard (1-minute resolution)
+        if (
+            not self._pnl_window
+            or (now - self._pnl_window[-1][0]).seconds >= 60
+        ):
+            self._pnl_window.append((now, day_pnl))
+            cutoff = FAST_DROP_WINDOW_MINUTES
+            self._pnl_window = [
+                (t, p) for t, p in self._pnl_window
+                if (now - t).seconds <= cutoff * 60
+            ]
+
+        if self._pnl_window:
+            window_max = max(
+                p for _, p in self._pnl_window
+            )
+            if window_max - day_pnl >= FAST_DROP_RUPEES:
+                self._fire_shock(
+                    f"FAST DROP: "
+                    f"₹{window_max - day_pnl:,.0f} lost in "
+                    f"{FAST_DROP_WINDOW_MINUTES} min — "
+                    f"shock reversal"
+                )
+
+    # --------------------------------------------------
+
+    def _fire_shock(self, reason):
+        self._lock(reason)
+
+        if self.shock_callback is not None:
+            try:
+                self.shock_callback(reason)
+            except Exception:
+                pass
+
+    # --------------------------------------------------
     # Portfolio heat / concentration
     # --------------------------------------------------
 
@@ -209,10 +354,10 @@ class RiskGovernor:
         # ---------------------------------
         day_pnl = self._day_pnl()
 
-        if day_pnl <= -abs(DAILY_MAX_LOSS):
+        if day_pnl <= -abs(self.daily_max_loss):
             self._lock(
                 f"Daily loss limit hit "
-                f"(₹{day_pnl:.0f} ≤ -₹{DAILY_MAX_LOSS})"
+                f"(₹{day_pnl:.0f} ≤ -₹{self.daily_max_loss:.0f})"
             )
             self.entries_blocked += 1
             return False, "Daily loss limit"
@@ -220,7 +365,7 @@ class RiskGovernor:
         # ---------------------------------
         # 3. Daily profit lock (soft: entries only)
         # ---------------------------------
-        if day_pnl >= abs(DAILY_MAX_PROFIT):
+        if day_pnl >= abs(self.daily_max_profit):
             if not self._profit_alert_sent:
                 self._profit_alert_sent = True
                 self.trade_controller.disable_entries()
@@ -293,10 +438,10 @@ class RiskGovernor:
 
         day_pnl = self._day_pnl()
 
-        if not self.locked and day_pnl <= -abs(DAILY_MAX_LOSS):
+        if not self.locked and day_pnl <= -abs(self.daily_max_loss):
             self._lock(
                 f"Daily loss limit hit after exit "
-                f"(₹{day_pnl:.0f} ≤ -₹{DAILY_MAX_LOSS})"
+                f"(₹{day_pnl:.0f} ≤ -₹{self.daily_max_loss:.0f})"
             )
 
     # --------------------------------------------------
@@ -445,7 +590,11 @@ class RiskGovernor:
             "locked": self.locked,
             "lock_reason": self.lock_reason,
             "day_pnl": round(self._day_pnl(), 2),
-            "daily_max_loss": DAILY_MAX_LOSS,
+            "daily_max_loss": self.daily_max_loss,
+            "daily_max_profit": self.daily_max_profit,
+            "regime": self.current_regime,
+            "limit_reason": self.limit_reason,
+            "day_peak": round(self.day_peak_pnl, 2),
             "consecutive_losses": self.consecutive_losses,
             "max_consecutive_losses": MAX_CONSECUTIVE_LOSSES,
             "max_portfolio_heat": MAX_PORTFOLIO_HEAT,

@@ -7,7 +7,7 @@ sys.path.insert(
 )
 
 from core.strategy import Strategy
-from config import ENTRY_BUFFER_PCT
+from config import ENTRY_BUFFER_PCT, ENTRY_CUTOFF_TIME
 
 
 def make_candle(close):
@@ -78,8 +78,9 @@ def test_after_cutoff():
 
     candle = make_candle(breakout_close(100))
 
+    # Global MIS cutoff from config (15:14)
     assert strategy.is_buy_signal(
-        orb, "15:01:00", candle
+        orb, ENTRY_CUTOFF_TIME + ":01", candle
     ) is False
 
     print("✅ Time Cutoff Test Passed")
