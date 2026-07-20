@@ -41,6 +41,24 @@ import pandas as pd
 
 MASTER_DATABASE = "Masterdata/master_database.xlsx"
 
+# --------------------------------------------------
+# Exchange-name blacklist
+#
+# "BSE" is both a stock ticker (BSE Ltd, the exchange operator)
+# and the near-universal way news/regulatory text refers to the
+# trading VENUE ("dealing in Illiquid Stock Options on BSE",
+# "listed on BSE", etc.). The venue usage vastly outnumbers
+# genuine BSE-Ltd-the-company news, and because BSE Ltd's own
+# company name collapses to "BSE" after stripping LIMITED/LTD,
+# there's no clean textual way to tell the two apart. Rather than
+# let every venue mention register as a false symbol match, we
+# blacklist these bare exchange-name keywords entirely. NSE isn't
+# itself listed, so it should never resolve to a symbol anyway --
+# blacklisting it here is just a safety net in case it's present
+# in the KEYWORDS column for some other row.
+# --------------------------------------------------
+BLACKLISTED_KEYWORDS = {"BSE", "NSE"}
+
 
 class SymbolMatcher:
 
@@ -91,6 +109,8 @@ class SymbolMatcher:
                 keywords.append(company_name_clean)
 
             for keyword in set(keywords):
+                if keyword in BLACKLISTED_KEYWORDS:
+                    continue
                 if keyword and symbol not in self.keyword_to_symbols[keyword]:
                     self.keyword_to_symbols[keyword].append(symbol)
 

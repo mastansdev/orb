@@ -119,6 +119,28 @@ class PositionThesisEngine:
 
     @staticmethod
     def _minutes_since(entry_time):
+        """
+        Minutes elapsed since entry_time (a bare "HH:MM:SS"
+        string with no date attached).
+
+        BUG FIXED HERE: naively doing (now - entered) on a
+        same-day reconstruction goes NEGATIVE whenever entry_time's
+        clock value is later in the day than the current wall
+        clock -- e.g. entry_time="09:20:00" evaluated at 07:40.
+        A negative elapsed value is always < THESIS_GRACE_MINUTES,
+        so the grace-period check above silently returns HOLD
+        and the decay check below never runs at all, no matter
+        how badly the thesis has actually decayed.
+
+        In real trading this can't happen (a position's
+        entry_time is always earlier the same session than any
+        later check), but it can happen when a test or replay
+        harness runs a fixed clock-time scenario before that
+        time of day -- which is exactly what caused this test to
+        fail when the suite ran at 07:40 with entry_time
+        "09:20:00". Clamp any negative diff to a large positive
+        number instead of letting it look like "still fresh".
+        """
         if not entry_time:
             return 999
         try:
@@ -128,7 +150,10 @@ class PositionThesisEngine:
                 hour=int(hh), minute=int(mm),
                 second=int(ss), microsecond=0
             )
-            return (now - entered).total_seconds() / 60
+            elapsed = (now - entered).total_seconds() / 60
+            if elapsed < 0:
+                return 999
+            return elapsed
         except Exception:
             return 999
 

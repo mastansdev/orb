@@ -99,13 +99,66 @@ class NewsClassifier:
             SECTOR_KEYWORDS
         )
 
-        if category == "UNKNOWN":
+        # --------------------------------------------------
+        # Priority / Confidence scoring
+        #
+        # PREVIOUS BEHAVIOUR (bug): confidence/priority were
+        # binary -- 0 if `category` stayed UNKNOWN, else a flat
+        # 100 for every single item that matched even one
+        # category keyword. A SEBI enforcement notice matching
+        # the word "regulatory" scored identically (100/100) to
+        # a genuine Tier-1 market-moving event. There was no
+        # concept of "how much real signal does this item carry".
+        #
+        # FIX: score is now the count of independent taxonomy
+        # dimensions that actually matched, weighted so a real
+        # matched stock symbol -- the single most concrete,
+        # actionable signal -- counts far more than a bare
+        # category keyword hit. This also folds in the
+        # collector's own source-tier priority (RawNews.priority,
+        # e.g. SEBI/RBI collector-assigned HIGH vs PIB MEDIUM) as
+        # a light floor, since regulators outrank generic press
+        # releases even before taxonomy matching.
+        # --------------------------------------------------
+        affected_symbols_matched = processed_news.symbols or []
+
+        signal_score = 0.0
+        if category != "UNKNOWN":
+            signal_score += 1.0
+        if subcategory != "UNKNOWN":
+            signal_score += 1.0
+        if event_type != "UNKNOWN":
+            signal_score += 1.0
+        if affected_assets:
+            signal_score += 1.0
+        if affected_sectors:
+            signal_score += 1.0
+        if affected_symbols_matched:
+            # A real, specific matched stock is worth more than
+            # any of the taxonomy-only signals combined.
+            signal_score += 4.0
+
+        max_signal_score = 8.0
+        computed_confidence = round(
+            (signal_score / max_signal_score) * 100
+        )
+
+        source_priority_floor = self._source_priority_floor(
+            processed_news.raw_news
+        )
+
+        classification_confidence = max(
+            computed_confidence, 0
+        )
+        priority_score = max(
+            computed_confidence, source_priority_floor
+        )
+
+        if category == "UNKNOWN" and not affected_symbols_matched:
             classification_method = "UNKNOWN"
-            classification_confidence = 0
             self._unknown += 1
         else:
             classification_method = "RULE"
-            classification_confidence = 100
             self._rule_matches += 1
 
         self._classified += 1
@@ -129,10 +182,34 @@ class NewsClassifier:
             theme="",
             affected_symbols=processed_news.symbols,
             affected_assets=affected_assets,
-            priority=classification_confidence,
+            priority=priority_score,
             confidence=float(classification_confidence),
             classification_method=classification_method
         )
+
+    # --------------------------------------------------
+
+    @staticmethod
+    def _source_priority_floor(raw_news):
+        """
+        Light floor derived from the collector's own source-tier
+        priority tag (e.g. RegulatoryCollector marks RBI/SEBI feeds
+        HIGH, PIB MEDIUM). This never pushes a no-signal item to a
+        high score on its own -- it only nudges the floor, since
+        signal_score above already dominates the final number.
+        """
+        raw_priority = getattr(raw_news, "priority", None)
+        name = getattr(raw_priority, "name", None)
+        if not name:
+            name = str(raw_priority) if raw_priority is not None else ""
+
+        tier = name.upper()
+
+        if "HIGH" in tier:
+            return 20
+        if "MEDIUM" in tier:
+            return 10
+        return 0
 
     # --------------------------------------------------
     # Helpers

@@ -11,8 +11,10 @@ than report them:
 
     • SEBI  — orders, circulars, enforcement
     • RBI   — policy, circulars, press releases
-    • PIB   — government press releases, cabinet
-              decisions, ministry announcements
+
+(PIB was previously included here but was removed --
+its press releases are general Hindi-language government/
+events coverage with no market relevance; see FEEDS below.)
 
 Responsibilities
 ----------------
@@ -65,6 +67,13 @@ class RegulatoryCollector(BaseCollector):
 
     # Each feed carries its own source/category/priority
     # mapping — regulators outrank media by default.
+    #
+    # NOTE: PIB (NewsSource.GOVERNMENT) intentionally removed.
+    # Confirmed to be general Hindi-language government/events
+    # press releases (ministerial visits, awards, inaugurations)
+    # with no market relevance -- previously fetched here every
+    # cycle only to be discarded downstream. No point collecting
+    # it at all.
     FEEDS = [
         {
             "url": "https://www.rbi.org.in/pressreleases_rss.xml",
@@ -83,16 +92,6 @@ class RegulatoryCollector(BaseCollector):
             "source": NewsSource.SEBI,
             "category": NewsCategory.REGULATORY,
             "priority": NewsPriority.HIGH,
-        },
-        {
-            # PIB All-Ministries press releases (English)
-            "url": (
-                "https://pib.gov.in/RssMain.aspx"
-                "?ModId=6&Lang=1&Regid=3"
-            ),
-            "source": NewsSource.GOVERNMENT,
-            "category": NewsCategory.GOVERNMENT,
-            "priority": NewsPriority.MEDIUM,
         },
     ]
 

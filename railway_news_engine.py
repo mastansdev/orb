@@ -1,3 +1,4 @@
+import re
 from collections import deque
 
 from repositories.intelligence_repository import (
@@ -20,6 +21,44 @@ from news.news_models import (
     ProcessedNews,
 )
 from news.symbol_matcher import symbol_matcher
+
+# --------------------------------------------------
+# Ingestion-level noise filters
+#
+# These patterns are boilerplate from SEBI's individual
+# enforcement/recovery-proceedings feed (recovery certificates,
+# demand notices, account attachments, adjudication orders,
+# appeals). They target a single named defaulter over a personal
+# case -- never a listed company or a tradeable event -- but they
+# mechanically mention "BSE"/"NSE" as the venue where the illiquid
+# options were dealt in, which was causing the symbol matcher to
+# false-positive match ticker BSE (and, via keyword bleed, ONGC/
+# OIL/ANANDRATHI/CHOICEIN) on every single one of them, each
+# scored Priority=100/Confidence=100 as if it were real news.
+#
+# GOVERNMENT source (PIB) is dropped entirely per explicit
+# decision: PIB press releases are general Hindi-language
+# government/events coverage (ministerial visits, awards,
+# inaugurations) -- not market intelligence, not useful to the bot.
+# --------------------------------------------------
+NOISE_HEADLINE_PATTERNS = [
+    r"recovery certificate",
+    r"notice of demand",
+    r"notice\(?s?\)?\s+of\s+attachment",
+    r"adjudication order",
+    r"remittance advice",
+    r"\bdefaulter\b",
+    r"illiquid stock(?:s)? options",
+    r"^appeal no\.",
+    r"summary settlement order",
+    r"caution to regulated entities",
+    r"PAN\s*:\s*[A-Z]{5}\d{4}[A-Z]",
+]
+NOISE_HEADLINE_RE = re.compile(
+    "|".join(NOISE_HEADLINE_PATTERNS), re.IGNORECASE
+)
+
+NOISE_SOURCE_SUBSTRINGS = ("GOVERNMENT",)
 
 
 class RailwayNewsEngine:
@@ -74,7 +113,7 @@ class RailwayNewsEngine:
 
     # --------------------------------------------------
     def collect(self):
-        total_news = 0
+        grand_total_news = 0
 
         for collector in self.collectors:
             try:
@@ -83,9 +122,16 @@ class RailwayNewsEngine:
                 print(f"[COLLECTOR] Received : {len(news_items)}")
 
                 duplicates = 0
+                filtered_noise = 0
+                new_this_collector = 0
+
                 for news in news_items:
 
                     if not self._validate(news):
+                        continue
+
+                    if self._is_noise(news):
+                        filtered_noise += 1
                         continue
 
                     news_hash = self.repository.generate_news_hash(
@@ -119,22 +165,24 @@ class RailwayNewsEngine:
                     # -------------------------
 
                     self.news_queue.append(news)
-                    total_news += 1
+                    new_this_collector += 1
+                    grand_total_news += 1
 
                 print()
                 print("=" * 60)
                 print(f"{collector.name} COLLECTION SUMMARY")
                 print("=" * 60)
                 print(f"Fetched      : {len(news_items)}")
-                print(f"New          : {total_news}")
+                print(f"New          : {new_this_collector}")
                 print(f"Duplicates   : {duplicates}")
+                print(f"Filtered     : {filtered_noise} (noise/irrelevant)")
                 print("=" * 60)
 
             except Exception as e:
                 print(f"[RAILWAY ERROR] {collector.name}")
                 print(e)
 
-        return total_news
+        return grand_total_news
 
     # --------------------------------------------------
     def _validate(self, news):
@@ -145,6 +193,22 @@ class RailwayNewsEngine:
             return False
 
         return True
+
+    # --------------------------------------------------
+    def _is_noise(self, news):
+        """
+        True if this item should never reach classification,
+        symbol matching, or storage at all -- see the noise
+        pattern comment block at the top of this file.
+        """
+        source_str = str(news.source).upper()
+        if any(s in source_str for s in NOISE_SOURCE_SUBSTRINGS):
+            return True
+
+        if NOISE_HEADLINE_RE.search(news.headline or ""):
+            return True
+
+        return False
 
     # --------------------------------------------------
     def process(self):

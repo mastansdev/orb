@@ -313,14 +313,32 @@ class IntelligenceRepository:
     def generate_news_hash(self, news):
         """
         Generate a stable unique hash for one news item.
+
+        IMPORTANT: this must NOT depend on published_at. Several
+        collectors (confirmed: SEBI/regulatory) do not expose a
+        true publish timestamp from the source and instead stamp
+        published_at with the collection-time "now()" -- which
+        changes on every poll cycle. Using it in the hash meant
+        the exact same headline/URL got a brand new hash every
+        cycle, so news_exists() never matched and the same item
+        was re-saved and re-emitted as "NEW RAW NEWS" indefinitely.
+
+        Fix: hash on URL when available (guaranteed stable per
+        item across every source we use -- SEBI, BSE, RSS all
+        give a permanent per-article URL). Fall back to
+        source+headline only when a collector has no URL.
         """
         import hashlib
 
-        text = (
-            f"{news.source.value}|"
-            f"{news.headline.strip()}|"
-            f"{news.published_at}"
-        )
+        url = getattr(news, "url", "") or ""
+
+        if url:
+            text = f"{news.source.value}|{url.strip()}"
+        else:
+            text = (
+                f"{news.source.value}|"
+                f"{news.headline.strip()}"
+            )
 
         return hashlib.sha256(
             text.encode("utf-8")
