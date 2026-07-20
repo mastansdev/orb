@@ -81,6 +81,75 @@ from intelligence.intelligence_context import IntelligenceContext
 load_dotenv()
 
 
+# ==========================================================
+# Portfolio view adapter for the Capital Allocation Cycle
+#
+# PortfolioIntelligenceEngine.evaluate() needs a generic
+# "portfolio" object with .weakest_position(). PortfolioLedger
+# is deliberately scoped to financial accounting only (its own
+# docstring: "Does NOT: Manage positions"), so this stays a
+# small, separate, read-only view over Engine.trades instead of
+# adding position logic to the ledger.
+# ==========================================================
+
+class _WeakestPosition:
+    def __init__(self, symbol, conviction, holding_seconds):
+        self.symbol = symbol
+        self.conviction = conviction
+        self.holding_seconds = holding_seconds
+
+
+class TradesPortfolioView:
+
+    def __init__(self, trades):
+        self._trades = trades
+
+    def __bool__(self):
+        return bool(self._trades)
+
+    def weakest_position(self):
+        if not self._trades:
+            return None
+
+        sid, trade = min(
+            self._trades.items(),
+            key=lambda item: item[1].get("conviction", 0),
+        )
+
+        holding_seconds = self._holding_seconds(
+            trade.get("entry_time", "")
+        )
+
+        return _WeakestPosition(
+            symbol=trade.get("symbol", "?"),
+            conviction=trade.get("conviction", 0),
+            holding_seconds=holding_seconds,
+        )
+
+    @staticmethod
+    def _holding_seconds(entry_time):
+        """
+        entry_time is a bare "HH:MM:SS" string with no date, so
+        naive subtraction against now() can go negative in edge
+        cases (same class of issue already fixed in
+        PositionThesisEngine._minutes_since). Never let a
+        negative diff look like "just entered."
+        """
+        if not entry_time:
+            return 0
+        try:
+            now = datetime.now()
+            hh, mm, ss = (entry_time.split(":") + ["0", "0"])[:3]
+            entered = now.replace(
+                hour=int(hh), minute=int(mm),
+                second=int(ss), microsecond=0
+            )
+            elapsed = (now - entered).total_seconds()
+            return elapsed if elapsed >= 0 else 999999
+        except Exception:
+            return 999999
+
+
 class Engine:
     
     # Structural constants for tracking and routing exit state metrics
@@ -300,6 +369,46 @@ class Engine:
             repository=self.market_memory.repository
         )
 
+        # --------------------------------------------------
+        # Fix (2026-07-20): wire these 5 intelligence engines
+        # into the Brain's evidence pipeline.
+        #
+        # Root cause found live: self.trade_selection_engine =
+        # TradeSelectionEngine() was called with ZERO arguments
+        # up in __init__ (before any of these 5 engines existed
+        # yet). TradeSelectionEngine's pattern_engine,
+        # company_intelligence, event_intelligence, fno_engine,
+        # and knowledge_graph all default to None, and every
+        # evidence-gathering block that uses them is guarded by
+        # "if self.xxx is not None:" -- so all of it was silently
+        # skipped, every candidate, every day, despite each of
+        # these engines being fully built, instantiated, and
+        # passing its own dedicated tests. This is what was
+        # confirmed live as "Continuation" always showing 0.0 in
+        # the Brain's quality inputs (Continuation is derived from
+        # Pattern/Company evidence specifically) -- and likely a
+        # meaningful chunk of missing event/catalyst richness too.
+        #
+        # Note: the constructor parameter is named "fno_engine"
+        # even though this instance's attribute is
+        # "fno_opportunity_engine" -- mapped correctly below.
+        # --------------------------------------------------
+        self.trade_selection_engine.pattern_engine = (
+            self.pattern_engine
+        )
+        self.trade_selection_engine.company_intelligence = (
+            self.company_intelligence
+        )
+        self.trade_selection_engine.event_intelligence = (
+            self.event_intelligence
+        )
+        self.trade_selection_engine.fno_engine = (
+            self.fno_opportunity_engine
+        )
+        self.trade_selection_engine.knowledge_graph = (
+            self.knowledge_graph
+        )
+
         # Results Calendar : no new risk into binary events
         self.results_calendar = ResultsCalendar(
             repository=self.market_memory.repository
@@ -511,6 +620,15 @@ class Engine:
                 # goes silent during market hours, say so
                 # instead of trading blind.
                 self._check_news_staleness(now_wall)
+
+                # Capital Allocation Cycle: is a better
+                # opportunity waiting in the pool than my
+                # weakest currently open position? Runs on the
+                # same 30s throttle -- no need for a separate
+                # timer, and the engine's own minimum-hold-time
+                # guard (10 min) means checking this often
+                # doesn't cause thrashing.
+                self.run_capital_allocation_cycle()
 
             self.monitor.increment("ticks")
             self.monitor.update_last_tick(ltt)
@@ -1584,7 +1702,21 @@ class Engine:
     
     def run_capital_allocation_cycle(self):
         """
-        Institutional Capital Allocation Pipeline
+        Institutional Capital Allocation Pipeline.
+
+        Checks whether the best-ranked opportunity still waiting
+        in the pool is meaningfully better (15+ conviction
+        points, per PortfolioIntelligenceEngine's
+        replacement_threshold) than the weakest currently open
+        position -- and that weakest position has been held past
+        the minimum hold time (10 min, prevents thrashing a
+        freshly-opened trade). If so, swap it out.
+
+        This is the fix for "don't sit idle when a better
+        opportunity appears": RiskGovernor's heat/sector caps
+        decide whether a NEW entry is safe; this cycle decides
+        whether an EXISTING position should make room for a
+        better one, independent of whether a cap is full.
         """
 
         # --------------------------------------------------
@@ -1596,35 +1728,53 @@ class Engine:
                     .opportunity_pool
                     .ranked()
         )
-        
+
         if not opportunities:
             return
-        
-        
-        print("\n" + "=" * 70)
-        print("         CAPITAL ALLOCATION CYCLE")
-        print("=" * 70)
-        
-        
-        print(f"Qualified Opportunities : {len(opportunities)}")
 
         # --------------------------------------------------
-        # Temporary Debug Output
+        #  2. Ask Portfolio Intelligence: keep or replace?
         # --------------------------------------------------
 
-        for i, opportunity in enumerate(opportunities[:10], start=1):
-            
-            
-            symbol = getattr(opportunity, "symbol", "UNKNOWN")
-            conviction = getattr(opportunity, "conviction", 0)
+        portfolio = TradesPortfolioView(self.trades)
 
-            print(
-                f"{i:02d}. "
-                f"{symbol:<15} "
-                f"Conviction : {conviction}"
-            )
+        recommendation = self.portfolio_intelligence_engine.evaluate(
+            portfolio=portfolio,
+            ranked_opportunities=opportunities,
+        )
 
-            print("=" * 70)
+        if recommendation.action != "REPLACE":
+            return
+
+        # --------------------------------------------------
+        #  3. Execute the replacement
+        # --------------------------------------------------
+
+        for sid, trade in self.trades.items():
+            if trade.get("symbol") == recommendation.weakest_symbol:
+                trade["force_exit"] = True
+
+                print(
+                    f"\n♻️ ALLOCATION CYCLE REPLACE\n"
+                    f"Out : {recommendation.weakest_symbol} "
+                    f"(conviction "
+                    f"{recommendation.weakest_conviction:.1f})\n"
+                    f"In  : {recommendation.candidate_symbol} "
+                    f"(conviction "
+                    f"{recommendation.candidate_conviction:.1f})\n"
+                )
+
+                self.telegram.send(
+                    f"♻️ CAPITAL REALLOCATION\n\n"
+                    f"Out : {recommendation.weakest_symbol} "
+                    f"(weakest, conviction "
+                    f"{recommendation.weakest_conviction:.1f})\n"
+                    f"In  : {recommendation.candidate_symbol} "
+                    f"(waiting in pool, conviction "
+                    f"{recommendation.candidate_conviction:.1f})\n\n"
+                    f"{recommendation.reason}"
+                )
+                break
 
 
     def shutdown(self):

@@ -7,6 +7,31 @@ class ORBEngine:
 
         self.orb_data = {}
 
+        # Fix (2026-07-20): re-entry bug -- entry_taken lives on
+        # orb_data, which is wiped clean on every restart. Without
+        # this, a symbol that already traded (and even closed
+        # profitably) today looks freshly eligible again the
+        # moment the engine restarts, causing a real duplicate
+        # same-day trade (confirmed live: BANKINDIA and BHARATFORG
+        # both re-entered this way). This set is populated ONCE at
+        # startup via load_already_traded(), from whatever already
+        # has a trade today (open or closed) -- BEFORE any ticks
+        # start building fresh orb_data entries.
+        self.already_traded_today = set()
+
+    # --------------------------------------------------
+    # Startup Reconciliation
+    # --------------------------------------------------
+
+    def load_already_traded(self, security_ids):
+        """
+        Called once at startup (or restart) with every security_id
+        that already has a trade today -- open or closed -- so a
+        fresh orb_data entry for that symbol is born already
+        marked entry_taken=True instead of defaulting to False.
+        """
+        self.already_traded_today = set(security_ids)
+
     # --------------------------------------------------
     # Load ORB from Historical API
     # --------------------------------------------------
@@ -19,7 +44,9 @@ class ORBEngine:
             "high": float(high),
             "low": float(low),
             "completed": True,
-            "entry_taken": False,
+            "entry_taken": (
+                security_id in self.already_traded_today
+            ),
             "date": today
         }
 
@@ -50,7 +77,9 @@ class ORBEngine:
                     "high": ltp,
                     "low": ltp,
                     "completed": False,
-                    "entry_taken": False,
+                    "entry_taken": (
+                        security_id in self.already_traded_today
+                    ),
                     "date": today
                 }
 

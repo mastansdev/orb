@@ -661,7 +661,17 @@ class Brain:
             if provider == "SECTOR":
 
                 intelligence.sector_strength = score
-                intelligence.dominant_sector = facts.get("sector_name", "UNKNOWN")
+                # Fix (2026-07-20): evidence_builder.py passes the
+                # RAW sector snapshot as facts, which uses "name"
+                # as the key (e.g. {'name': 'BANKING', 'rank': 15,
+                # ...}) -- not "sector_name", which never existed
+                # in this dict at all. Confirmed live: this always
+                # fell through to the "UNKNOWN" default, which is
+                # what broke both trade_log_v2.csv's sector column
+                # and RiskGovernor's sector-cap veto ("Sector cap:
+                # 3 open positions in UNKNOWN" instead of the real
+                # sector, e.g. BANKING).
+                intelligence.dominant_sector = facts.get("name", "UNKNOWN")
 
             # ----------------------------
             # Industry
@@ -670,7 +680,8 @@ class Brain:
             elif provider == "INDUSTRY":
 
                 intelligence.industry_strength = score
-                intelligence.dominant_industry = facts.get("industry_name", "UNKNOWN")
+                # Same key-mismatch fix as SECTOR above.
+                intelligence.dominant_industry = facts.get("name", "UNKNOWN")
 
             # ----------------------------
             # Theme
@@ -679,7 +690,8 @@ class Brain:
             elif provider == "THEME":
 
                 intelligence.theme_strength = score
-                intelligence.dominant_theme = facts.get("theme_name", "UNKNOWN")
+                # Same key-mismatch fix as SECTOR above.
+                intelligence.dominant_theme = facts.get("name", "UNKNOWN")
 
             # ----------------------------
             # News

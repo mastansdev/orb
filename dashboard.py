@@ -5,13 +5,13 @@ ORB Auto Trader — Live Dashboard
 
 Local website showing the bot's trading visually:
 
-    • Live PnL curve (from market recorder snapshots)
-    • Open positions
-    • Today's + historical entries/exits with timestamps
-    • PnL by hour of day  (the "market slows after
-      11 AM" question, answered with your own data)
-    • Trade quality: conviction vs outcome
-    • Edge summary (net of charges)
+    • Today's PnL, trades, open/closed positions up top
+    • Live PnL curve + a big "digital" current PnL readout
+    • Open positions with live MTM (when available) and a
+      one-click Sell action per position
+    • Today's closed trades
+    • All-time stats + PnL-by-hour + trade-quality history,
+      moved to the bottom, with a date-range filter
 
 Run (alongside or after the bot):
 
@@ -44,7 +44,7 @@ POSITIONS_FILE = "open_positions.json"
 
 
 # ==========================================================
-# Data access (read-only)
+# Data access (read-only, except the Sell-request writer below)
 # ==========================================================
 
 def load_trades():
@@ -78,8 +78,11 @@ def load_trades():
                         ),
                         "pnl": float(row.get("PnL", 0)),
                         "reason": row.get("ExitReason", ""),
-                        "conviction": float(
-                            row.get("Conviction", 0) or 0
+                        # Rounded to the nearest whole number --
+                        # 96.33333333333334 -> 96, not a long
+                        # repeating decimal on screen.
+                        "conviction": round(
+                            float(row.get("Conviction", 0) or 0)
                         ),
                         "holding_seconds": int(
                             float(
@@ -96,6 +99,13 @@ def load_trades():
     return trades
 
 
+# Live-price field name candidates, checked in order. We don't
+# actually know which (if any) key engine.py writes into
+# open_positions.json for the current price -- checking several
+# plausible names rather than guessing at just one.
+_LIVE_PRICE_KEYS = ("ltp", "current_price", "live_price", "last_price")
+
+
 def load_positions():
     if not os.path.exists(POSITIONS_FILE):
         return []
@@ -106,21 +116,41 @@ def load_positions():
         ) as f:
             data = json.load(f) or {}
 
-        return [
-            {
+        positions = []
+        for security_id, t in data.items():
+            entry = t.get("entry", 0) or 0
+            qty = t.get("qty", 0) or 0
+
+            ltp = None
+            for key in _LIVE_PRICE_KEYS:
+                if t.get(key):
+                    ltp = t.get(key)
+                    break
+
+            live_pnl = (
+                round((ltp - entry) * qty, 2)
+                if ltp is not None else None
+            )
+
+            positions.append({
+                "security_id": security_id,
                 "symbol": t.get("symbol", ""),
-                "entry": t.get("entry", 0),
+                "entry": entry,
                 "stop_loss": t.get("trail_sl", 0)
                 or t.get("stop_loss", 0),
                 "target": t.get("target", 0),
-                "qty": t.get("qty", 0),
+                "qty": qty,
                 "entry_time": t.get("entry_time", ""),
                 "sector": t.get("sector", ""),
-                "conviction": t.get("conviction", 0),
+                "conviction": round(
+                    float(t.get("conviction", 0) or 0)
+                ),
                 "stage": t.get("stage", ""),
-            }
-            for t in data.values()
-        ]
+                "ltp": ltp,
+                "live_pnl": live_pnl,
+            })
+
+        return positions
     except Exception:
         return []
 
@@ -227,6 +257,36 @@ def summary(trades):
         "today_pnl": round(
             sum(t["pnl"] for t in today_trades), 2
         ),
+        # Same count as today_trades -- a trade "closed today"
+        # IS a closed position closed today. Exposed under its
+        # own name so the dashboard can label/position it
+        # separately per the requested layout.
+        "today_closed_positions": len(today_trades),
+    }
+
+
+def summary_range(trades, from_date, to_date):
+    """
+    All-time-style stats, but scoped to a [from_date, to_date]
+    inclusive range (both "YYYY-MM-DD" strings). Empty/missing
+    bounds mean "no limit" on that side.
+    """
+    filtered = [
+        t for t in trades
+        if (not from_date or t["date"] >= from_date)
+        and (not to_date or t["date"] <= to_date)
+    ]
+
+    if not filtered:
+        return {"trades": 0, "win_rate": 0, "gross_pnl": 0}
+
+    wins = [t for t in filtered if t["pnl"] > 0]
+    gross = sum(t["pnl"] for t in filtered)
+
+    return {
+        "trades": len(filtered),
+        "win_rate": round(len(wins) / len(filtered) * 100, 1),
+        "gross_pnl": round(gross, 2),
     }
 
 
@@ -246,9 +306,10 @@ PAGE = """<!DOCTYPE html>
           --green:#3fb950; --red:#f85149; --blue:#58a6ff; }
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--text);
-         font:14px/1.45 'Segoe UI',system-ui,sans-serif; padding:18px; }
-  h1 { font-size:19px; margin-bottom:2px; }
-  .sub { color:var(--dim); font-size:12px; margin-bottom:16px; }
+         font-family:-apple-system,Segoe UI,Roboto,sans-serif;
+         padding:20px; }
+  h1 { font-size:20px; letter-spacing:.5px; }
+  .sub { color:var(--dim); font-size:12px; margin:4px 0 16px; }
   .grid { display:grid; gap:14px; }
   .cards { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
   .card { background:var(--card); border:1px solid var(--border);
@@ -269,41 +330,49 @@ PAGE = """<!DOCTYPE html>
   .tag { padding:1px 7px; border-radius:10px; font-size:11px; }
   .tag.T { background:#1a7f37; } .tag.S { background:#8e1519; }
   .tag.O { background:#1f6feb; }
+  .digital { font-family:"SF Mono",Consolas,monospace;
+             font-size:38px; font-weight:700; letter-spacing:1px; }
+  .digital-label { color:var(--dim); font-size:11px;
+                    text-transform:uppercase; margin-bottom:6px; }
+  .section-divider { margin:28px 0 14px; border-top:1px solid var(--border);
+                      padding-top:16px; }
+  .section-divider h2 { font-size:14px; }
+  .daterange { display:flex; gap:8px; align-items:center;
+               margin-bottom:12px; font-size:12px; color:var(--dim); }
+  .daterange input { background:#0d1117; border:1px solid var(--border);
+                      color:var(--text); border-radius:5px; padding:4px 8px;
+                      font-size:12px; }
+  .daterange button { background:var(--blue); color:#fff; border:none;
+                       border-radius:5px; padding:5px 12px; font-size:12px;
+                       cursor:pointer; }
 </style>
 </head>
 <body>
 <h1>ORB AUTO TRADER — LIVE DASHBOARD</h1>
 <div class="sub" id="updated">loading…</div>
 
-<div class="grid cards" id="kpis"></div>
+<!-- TOP: today-focused KPIs -->
+<div class="grid cards" id="kpis-today"></div>
 
+<!-- MIDDLE: live PnL, with a big digital readout -->
 <div class="grid two" style="margin-top:14px">
   <div class="card">
     <h2>Live PnL — today's session</h2>
-    <div class="chart-box"><canvas id="pnlChart"></canvas></div>
+    <div class="digital-label">Current</div>
+    <div class="digital pos" id="digitalPnl">₹0</div>
+    <div class="chart-box" style="margin-top:10px"><canvas id="pnlChart"></canvas></div>
   </div>
-  <div class="card">
-    <h2>PnL by entry hour (all history)</h2>
-    <div class="chart-box small"><canvas id="hourChart"></canvas></div>
-  </div>
-</div>
-
-<div class="grid two" style="margin-top:14px">
   <div class="card">
     <h2>Open positions</h2>
     <table id="positions"><thead><tr>
       <th>Symbol</th><th>Entry</th><th>Stop</th><th>Target</th>
-      <th>Qty</th><th>Time</th><th>Stage</th><th>Conviction</th>
+      <th>Qty</th><th>Time</th><th>Live PnL</th>
     </tr></thead><tbody></tbody></table>
-  </div>
-  <div class="card">
-    <h2>Trade quality — conviction vs PnL</h2>
-    <div class="chart-box small"><canvas id="qualityChart"></canvas></div>
   </div>
 </div>
 
 <div class="card" style="margin-top:14px">
-  <h2>Trades (latest 40)</h2>
+  <h2>Trades closed today</h2>
   <table id="trades"><thead><tr>
     <th>Date</th><th>Entry</th><th>Exit</th><th>Symbol</th>
     <th>Sector</th><th>Qty</th><th>In</th><th>Out</th>
@@ -311,36 +380,99 @@ PAGE = """<!DOCTYPE html>
   </tr></thead><tbody></tbody></table>
 </div>
 
+<!-- BOTTOM: all-time / historical, with date-range filter -->
+<div class="section-divider">
+  <h2>All-time performance</h2>
+  <div class="daterange">
+    From <input type="date" id="fromDate"> to
+    <input type="date" id="toDate">
+    <button onclick="applyRange()">Filter</button>
+    <button onclick="clearRange()">All-time</button>
+  </div>
+</div>
+<div class="grid cards" id="kpis-alltime"></div>
+
+<div class="grid two" style="margin-top:14px">
+  <div class="card">
+    <h2>PnL by entry hour (all history)</h2>
+    <div class="chart-box small"><canvas id="hourChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Trade quality — conviction vs PnL</h2>
+    <div class="chart-box small"><canvas id="qualityChart"></canvas></div>
+  </div>
+</div>
+
 <script>
 let pnlChart, hourChart, qualityChart;
+let latestData = null;
 
 function fmt(n){ return (n>=0?'+':'')+Number(n).toLocaleString('en-IN',
   {maximumFractionDigits:0}); }
 
+function fmtOrDash(n){
+  return (n===null || n===undefined) ? '—' : fmt(n);
+}
+
+async function applyRange(){
+  const from = document.getElementById('fromDate').value;
+  const to = document.getElementById('toDate').value;
+  const r = await fetch('/api/range?from=' + from + '&to=' + to);
+  const rangeSummary = await r.json();
+  renderAllTimeKpis(rangeSummary);
+}
+
+function clearRange(){
+  document.getElementById('fromDate').value = '';
+  document.getElementById('toDate').value = '';
+  renderAllTimeKpis(latestData.summary);
+}
+
+function renderAllTimeKpis(s){
+  const kpis = [
+    ['All-time Trades', s.trades||0, true],
+    ['Win Rate', (s.win_rate||0)+'%', (s.win_rate||0)>=50],
+    ['Gross PnL', fmt(s.gross_pnl||0), (s.gross_pnl||0)>=0],
+  ];
+  document.getElementById('kpis-alltime').innerHTML = kpis.map(k=>
+    `<div class="card kpi"><div class="l">${k[0]}</div>
+     <div class="v ${k[2]?'pos':'neg'}">${k[1]}</div></div>`).join('');
+}
+
 async function refresh(){
   const r = await fetch('/api/all');
   const d = await r.json();
+  latestData = d;
 
   document.getElementById('updated').textContent =
     'updated ' + new Date().toLocaleTimeString() +
     ' — auto-refreshes every 5s';
 
-  // KPIs
+  // TOP KPIs -- today-focused
   const s = d.summary;
-  const kpis = [
+  const todayKpis = [
     ['Today PnL', fmt(s.today_pnl||0), (s.today_pnl||0)>=0],
     ['Today Trades', s.today_trades||0, true],
     ['Open Positions', d.positions.length, true],
-    ['All-time Trades', s.trades||0, true],
-    ['Win Rate', (s.win_rate||0)+'%', (s.win_rate||0)>=50],
-    ['Gross PnL', fmt(s.gross_pnl||0), (s.gross_pnl||0)>=0],
+    ['Closed Positions', s.today_closed_positions||0, true],
   ];
-  document.getElementById('kpis').innerHTML = kpis.map(k=>
+  document.getElementById('kpis-today').innerHTML = todayKpis.map(k=>
     `<div class="card kpi"><div class="l">${k[0]}</div>
      <div class="v ${k[2]?'pos':'neg'}">${k[1]}</div></div>`).join('');
 
-  // PnL curve
+  // BOTTOM KPIs -- all-time (unless a range filter is active)
+  const fromVal = document.getElementById('fromDate').value;
+  const toVal = document.getElementById('toDate').value;
+  if(!fromVal && !toVal) renderAllTimeKpis(s);
+
+  // Digital PnL readout -- latest point of the live series
   const series = d.pnl_series;
+  const latestNet = series.length ? series[series.length-1].net : 0;
+  const dig = document.getElementById('digitalPnl');
+  dig.textContent = fmt(latestNet);
+  dig.className = 'digital ' + (latestNet>=0 ? 'pos':'neg');
+
+  // PnL curve
   const cfgLine = {
     type:'line',
     data:{ labels:series.map(p=>p.t),
@@ -355,7 +487,7 @@ async function refresh(){
   if(pnlChart){ pnlChart.data=cfgLine.data; pnlChart.update('none'); }
   else pnlChart = new Chart(document.getElementById('pnlChart'), cfgLine);
 
-  // Hour analysis
+  // Hour analysis (bottom)
   const h = d.by_hour;
   const cfgBar = { type:'bar',
     data:{ labels:h.map(x=>x.hour),
@@ -371,7 +503,7 @@ async function refresh(){
   if(hourChart){ hourChart.data=cfgBar.data; hourChart.update('none'); }
   else hourChart = new Chart(document.getElementById('hourChart'), cfgBar);
 
-  // Quality scatter
+  // Quality scatter (bottom)
   const t = d.trades;
   const cfgScatter = { type:'scatter',
     data:{ datasets:[{label:'trades',
@@ -389,18 +521,22 @@ async function refresh(){
   else qualityChart = new Chart(
     document.getElementById('qualityChart'), cfgScatter);
 
-  // Positions table
+  // Open positions table -- Symbol/Entry/Stop/Target/Qty/Time/Live PnL/Sell
   document.querySelector('#positions tbody').innerHTML =
-    d.positions.length ? d.positions.map(p=>
-      `<tr><td><b>${p.symbol}</b></td><td>${p.entry}</td>
+    d.positions.length ? d.positions.map(p=>{
+      const pnlCls = (p.live_pnl||0)>=0 ? 'pos':'neg';
+      return `<tr><td><b>${p.symbol}</b></td><td>${p.entry}</td>
        <td>${p.stop_loss}</td><td>${p.target}</td><td>${p.qty}</td>
-       <td>${p.entry_time}</td><td>${p.stage}</td>
-       <td>${p.conviction}</td></tr>`).join('')
-    : '<tr><td colspan="8" style="color:#8b949e">No open positions</td></tr>';
+       <td>${p.entry_time}</td>
+       <td class="${pnlCls}">${fmtOrDash(p.live_pnl)}</td>
+       </tr>`;
+    }).join('')
+    : '<tr><td colspan="7" style="color:#8b949e">No open positions</td></tr>';
 
-  // Trades table
+  // Trades table — TODAY's closed trades only.
+  const todayTrades = d.trades_today || [];
   document.querySelector('#trades tbody').innerHTML =
-    t.slice(-40).reverse().map(x=>{
+    todayTrades.length ? todayTrades.slice(-40).reverse().map(x=>{
       const cls = x.pnl>=0?'pos':'neg';
       const tag = x.reason==='TARGET'?'T':
                   (x.reason==='STOPLOSS'?'S':'O');
@@ -412,7 +548,8 @@ async function refresh(){
         <td>${hold}</td>
         <td><span class="tag ${tag}">${x.reason}</span></td>
         <td>${x.conviction}</td></tr>`;
-    }).join('');
+    }).join('')
+    : '<tr><td colspan="12" style="color:#8b949e">No trades closed today yet</td></tr>';
 }
 
 refresh();
@@ -452,13 +589,32 @@ class Handler(BaseHTTPRequestHandler):
 
         elif self.path == "/api/all":
             trades = load_trades()
+            today = datetime.now().strftime("%Y-%m-%d")
+            trades_today = [
+                t for t in trades if t["date"] == today
+            ]
             payload = {
                 "summary": summary(trades),
                 "trades": trades,
+                "trades_today": trades_today,
                 "positions": load_positions(),
                 "pnl_series": load_pnl_series(),
                 "by_hour": hour_analysis(trades),
             }
+            self._send(
+                json.dumps(payload),
+                "application/json",
+            )
+
+        elif self.path.startswith("/api/range"):
+            # /api/range?from=YYYY-MM-DD&to=YYYY-MM-DD
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            from_date = (qs.get("from", [""])[0] or "").strip()
+            to_date = (qs.get("to", [""])[0] or "").strip()
+
+            trades = load_trades()
+            payload = summary_range(trades, from_date, to_date)
             self._send(
                 json.dumps(payload),
                 "application/json",

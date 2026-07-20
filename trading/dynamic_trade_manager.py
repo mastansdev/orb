@@ -41,6 +41,8 @@ Author : H&M ORB AUTO TRADER
 ==========================================================
 """
 
+import time
+
 from config import (
     DYNAMIC_MANAGEMENT_ENABLED,
     PARTIAL_BOOK_AT_R,
@@ -56,6 +58,43 @@ class DynamicTradeManager:
         "WEAKENING", "CONTRADICTED", "NEGATIVE", "BEARISH"
     )
 
+    # How tight the trail starts, right at PROFIT_LOCK_AT_R, before
+    # progressively loosening toward TRAIL_DISTANCE_R by the time
+    # the trade reaches TRAIL_AFTER_R. Consider moving to config.py
+    # if this needs tuning independently later.
+    MIN_TRAIL_DISTANCE_R = 0.3
+
+    # ---------------------------------
+    # VELOCITY GUARD (2026-07-20)
+    #
+    # User's trading philosophy: "if any open position is observed
+    # retracing and falling too speed, book that position
+    # (irrespective of pnl)... not first-see-first-buy." The
+    # progressive trail above reacts to how FAR price has fallen
+    # from its peak -- this reacts to how FAST it's falling, even
+    # if it hasn't given back much yet. A stock can be well inside
+    # its trail distance but still be crashing violently in the
+    # last couple of minutes; the trail alone wouldn't catch that
+    # until the damage accumulates.
+    #
+    # Mechanism: track a short rolling window of recent prices per
+    # trade. If price has dropped by VELOCITY_DROP_R (in R-multiples
+    # of the trade's own risk) from its OWN short-term peak within
+    # that window, exit immediately -- regardless of current PnL,
+    # regardless of where the R-multiple-based trail would have
+    # fired. This is deliberately independent of and faster-firing
+    # than the trail.
+    #
+    # Tuning tradeoff, stated plainly: too tight and this will cut
+    # genuine winners short on normal 1-2 minute noise/profit-taking
+    # pullbacks that would have continued running; too loose and it
+    # stops being meaningfully faster than the existing trail. These
+    # starting values are a reasoned first attempt, not a backtested
+    # optimum -- watch how often this fires in practice and adjust.
+    # ---------------------------------
+    VELOCITY_WINDOW_SECONDS = 120   # look back this far for the local peak
+    VELOCITY_DROP_R = 0.5           # exit if price falls this many R from that local peak
+
     def __init__(
         self,
         event_intelligence=None,
@@ -67,6 +106,7 @@ class DynamicTradeManager:
         self.partials_booked = 0
         self.tightens = 0
         self.catalyst_exits = 0
+        self.velocity_exits = 0
 
     # --------------------------------------------------
 
@@ -103,6 +143,21 @@ class DynamicTradeManager:
                 "reason": (
                     f"Negative catalyst: {negative_reason}"
                 ),
+            }
+
+        # ---------------------------------
+        # 1c. VELOCITY GUARD — sharp, fast reversal
+        #     → EXIT regardless of current PnL
+        # ---------------------------------
+        velocity_reason = self._velocity_exit(
+            trade, ltp, risk
+        )
+
+        if velocity_reason:
+            self.velocity_exits += 1
+            return {
+                "action": "EXIT",
+                "reason": velocity_reason,
             }
 
         # ---------------------------------
@@ -163,21 +218,72 @@ class DynamicTradeManager:
             }
 
         # ---------------------------------
-        # 3. Ratchet trailing after TRAIL_AFTER_R
+        # 3. PROGRESSIVE TRAIL
+        #
+        # Fix for the profit-giveback bug found live on V2RETAIL
+        # (2026-07-20): the OLD logic had a dead zone between
+        # PROFIT_LOCK_AT_R (0.6R -- a one-time STATIC floor) and
+        # TRAIL_AFTER_R (1.5R -- where active ratcheting used to
+        # start). A trade peaking inside that zone got NO adaptive
+        # protection at all -- just the static floor, set far below
+        # its peak. V2RETAIL peaked at ~1.04R (squarely in the gap)
+        # and gave back 85.6% of its peak profit (₹7,543 → ₹1,087)
+        # before the static floor finally caught it.
+        #
+        # Fix: start trailing at the SAME point profit-lock fires
+        # (PROFIT_LOCK_AT_R), using a tight distance that
+        # PROGRESSIVELY LOOSENS as the move extends toward
+        # TRAIL_AFTER_R, reaching today's existing TRAIL_DISTANCE_R
+        # exactly at TRAIL_AFTER_R and staying there beyond it.
+        #
+        # This means trades that run big (>= TRAIL_AFTER_R) behave
+        # IDENTICALLY to before -- no regression for proven big
+        # movers, which the existing test suite already validates
+        # ("trail ratchets", "trail level correct", "trail never
+        # widens"). Only trades that peak in the former dead zone
+        # get real protection now.
         # ---------------------------------
-        if r_multiple >= TRAIL_AFTER_R:
+        highest = trade.get("highest_price", ltp)
 
-            highest = trade.get("highest_price", ltp)
+        # IMPORTANT: use the PEAK r-multiple (based on highest_price,
+        # which only ever increases) to size the trail distance, not
+        # the CURRENT r-multiple (based on ltp, which drops as price
+        # reverses). Using current r-multiple here would make the
+        # trail distance shrink WHILE price is falling -- unstable,
+        # unintended behavior. Peak r-multiple freezes the moment a
+        # trade tops out, so the trail distance (and therefore the
+        # trail price) also freezes at a single, stable value once
+        # the reversal begins -- exactly what "how far did this
+        # trade prove itself" should mean.
+        peak_r_multiple = (highest - entry) / risk
+
+        if peak_r_multiple >= PROFIT_LOCK_AT_R:
+
+            if peak_r_multiple >= TRAIL_AFTER_R:
+                trail_distance_r = TRAIL_DISTANCE_R
+            else:
+                span = TRAIL_AFTER_R - PROFIT_LOCK_AT_R
+                progress = (
+                    (peak_r_multiple - PROFIT_LOCK_AT_R) / span
+                    if span > 0 else 1.0
+                )
+                trail_distance_r = (
+                    self.MIN_TRAIL_DISTANCE_R
+                    + progress * (
+                        TRAIL_DISTANCE_R
+                        - self.MIN_TRAIL_DISTANCE_R
+                    )
+                )
 
             candidate_trail = round(
-                highest - (TRAIL_DISTANCE_R * risk), 2
+                highest - (trail_distance_r * risk), 2
             )
 
             current_trail = trade.get(
                 "trail_sl", trade.get("stop_loss", 0)
             )
 
-            # Ratchet only — never widen
+            # Ratchet only — never widen (same guarantee as before)
             if candidate_trail > current_trail:
                 self.tightens += 1
 
@@ -185,8 +291,9 @@ class DynamicTradeManager:
                     "action": "TIGHTEN",
                     "new_trail": candidate_trail,
                     "reason": (
-                        f"+{r_multiple:.1f}R — trail "
-                        f"→ ₹{candidate_trail:.2f}"
+                        f"peak +{peak_r_multiple:.2f}R — trail "
+                        f"(dist {trail_distance_r:.2f}R) → "
+                        f"₹{candidate_trail:.2f}"
                     ),
                 }
 
@@ -251,9 +358,49 @@ class DynamicTradeManager:
 
     # --------------------------------------------------
 
+    def _velocity_exit(self, trade, ltp, risk):
+        """
+        Track a short rolling window of recent prices for THIS
+        trade, and exit if price has dropped by VELOCITY_DROP_R
+        (in R-multiples) from its own SHORT-TERM peak within
+        VELOCITY_WINDOW_SECONDS -- independent of the trade's
+        all-time peak or current overall PnL. Returns a reason
+        string if triggered, else None.
+        """
+        now = time.time()
+
+        history = trade.setdefault("velocity_history", [])
+        history.append((now, ltp))
+
+        # Prune anything outside the lookback window.
+        cutoff = now - self.VELOCITY_WINDOW_SECONDS
+        history[:] = [
+            (t, p) for t, p in history if t >= cutoff
+        ]
+
+        if len(history) < 2:
+            # Not enough samples yet to judge speed.
+            return None
+
+        local_peak = max(p for _, p in history)
+        drop_r = (local_peak - ltp) / risk
+
+        if drop_r >= self.VELOCITY_DROP_R:
+            return (
+                f"Velocity guard: fell {drop_r:.2f}R from its "
+                f"own {self.VELOCITY_WINDOW_SECONDS}s peak "
+                f"(₹{local_peak:.2f} → ₹{ltp:.2f}) — sharp "
+                f"reversal, exiting regardless of PnL"
+            )
+
+        return None
+
+    # --------------------------------------------------
+
     def stats(self):
         return {
             "partials_booked": self.partials_booked,
             "tightens": self.tightens,
             "catalyst_exits": self.catalyst_exits,
+            "velocity_exits": self.velocity_exits,
         }

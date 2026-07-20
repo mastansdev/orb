@@ -160,53 +160,83 @@ class MarketStoryBuilder:
         return story
 
     # --------------------------------------------------
+    # How long a story stays eligible to absorb new news via
+    # theme/industry matching. Catalyst matches have no time
+    # limit -- a shared, specific catalyst is strong enough
+    # evidence on its own regardless of how much time has passed.
+    STORY_MERGE_WINDOW = timedelta(hours=2)
+
     def _find_matching_story(
         self,
         classified_news
     ):
         """
-        Find an existing Market Story that
-        matches this classified news.
+        Find an existing Market Story that matches this classified
+        news.
 
-        Returns None if no suitable story
-        exists.
+        Fix (2026-07-20): this used to merge on ANY SINGLE ONE of
+        catalyst/theme/industry/SECTOR matching, with no recency
+        limit. Confirmed live in production: this let a handful of
+        giant, incoherent "mega stories" form per sector -- e.g. a
+        real PHARMA story ballooned to 30 symbols including BSE,
+        RELIANCE, DMART, and BOSCHLTD (none of them pharma
+        companies), and a BANKING story reached ~100 symbols
+        spanning banks, hotels, cement, and IT. Root cause: sector
+        is a very broad tag (dozens of unrelated companies share
+        one), and with no recency check an old story kept silently
+        absorbing every new headline that loosely matched its
+        sector, all day long.
+
+        New merge criteria, ranked strongest to weakest:
+
+        1. Same non-empty CATALYST -- the most specific,
+           narrative-level signal (e.g. a named M&A deal, a
+           specific results announcement). No recency limit: a
+           real shared catalyst is strong evidence on its own.
+        2. Same non-empty THEME or INDUSTRY -- narrower than
+           sector, but still broad enough to need a recency guard
+           (STORY_MERGE_WINDOW) so an hours-old story doesn't keep
+           absorbing unrelated new headlines indefinitely.
+        3. SECTOR ALONE is deliberately no longer a merge trigger.
+           It was the primary driver of the mega-story problem --
+           a genuine sector-wide rotation story should only form
+           from repeated theme/industry signals, not a single bare
+           sector-tag coincidence between two unrelated headlines.
+
+        Returns None if no suitable story exists.
         """
-        # --------------------------------------------------
+        now = datetime.now()
+
+        # ----------------------------------------------
+        # 1. Same catalyst -- strongest signal, no recency limit
+        # ----------------------------------------------
+        if classified_news.catalyst:
+            for story in self.active_stories.values():
+                if (
+                    story.catalyst
+                    and story.catalyst == classified_news.catalyst
+                ):
+                    return story
+
+        # ----------------------------------------------
+        # 2. Same theme or industry -- requires recency
+        # ----------------------------------------------
         for story in self.active_stories.values():
 
-            # ----------------------------------------------
-            # Same Catalyst
-            # ----------------------------------------------
-            if (
-                story.catalyst 
-                and story.catalyst == classified_news.catalyst
-            ):
-                return story
+            if now - story.updated_at > self.STORY_MERGE_WINDOW:
+                continue
 
-            # ----------------------------------------------
-            # Same Theme
-            # ----------------------------------------------
             if (
-                story.theme 
+                classified_news.theme
+                and story.theme
                 and story.theme == classified_news.theme
             ):
                 return story
 
-            # ----------------------------------------------
-            # Same Industry
-            # ----------------------------------------------
             if (
-                story.industry 
+                classified_news.industry
+                and story.industry
                 and story.industry == classified_news.industry
-            ):
-                return story
-
-            # ----------------------------------------------
-            # Same Sector
-            # ----------------------------------------------
-            if (
-                story.sector 
-                and story.sector == classified_news.sector
             ):
                 return story
 
