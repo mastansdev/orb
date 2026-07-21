@@ -1148,22 +1148,77 @@ class TradeSelectionEngine:
         no brain, no pool, no side effects. Used by the
         HOLD brain to re-evaluate open-position theses.
         Returns a 0-100 conviction score (0 on failure).
+
+        Fix (2026-07-21): this used to rebuild evidence from
+        only 5 of the 10 sources evaluate() uses at entry --
+        missing news (MARKET_STORY + SENSITIVITY), the post-
+        results catalyst, knowledge-graph sympathy spillover,
+        and causal-chain evidence entirely. Two real problems
+        followed from that: (1) "current" was never a fair
+        comparison to entry_conviction, since half the
+        evidence a position entered on wasn't being rebuilt --
+        biasing every thesis check toward looking artificially
+        decayed even when nothing had changed; (2) worse, if a
+        position entered partly on a news catalyst, the HOLD
+        brain was structurally blind to that catalyst fading or
+        reversing -- exactly the scenario this engine's own
+        docstring says it exists to catch ("catalyst fades is a
+        dead trade"). Now rebuilds the SAME evidence set
+        evaluate() does, symmetrically, minus the two things
+        that only make sense at entry (the ORB structure gate
+        and the catalyst hard-block, both entry-timing checks,
+        not thesis-quality checks).
         """
         try:
             evidence = self.evidence_builder.build(
                 intelligence
             )
 
-            for engine, sym_arg in (
-                (self.pattern_engine, True),
-                (self.company_intelligence, True),
-                (self.event_intelligence, True),
-                (self.fno_engine, True),
+            symbol_upper = symbol.upper()
+            try:
+                evidence += [
+                    ev for _, ev in self._news_evidence_cache
+                    if ev.symbol.upper() == symbol_upper
+                ]
+            except Exception:
+                pass
+
+            for engine in (
+                self.pattern_engine,
+                self.company_intelligence,
+                self.event_intelligence,
+                self.fno_engine,
             ):
                 if engine is None:
                     continue
                 try:
                     evidence += engine.build_evidence(symbol)
+                except Exception:
+                    pass
+
+            rw = getattr(self, "results_watchlist", None)
+            if rw is not None:
+                try:
+                    evidence += rw.build_evidence(symbol)
+                except Exception:
+                    pass
+
+            if self.knowledge_graph is not None:
+                try:
+                    evidence += (
+                        self.knowledge_graph
+                        .build_sympathy_evidence(
+                            symbol, self._recent_spillovers
+                        )
+                    )
+                except Exception:
+                    pass
+
+            if self.causal_engine is not None:
+                try:
+                    evidence += self.causal_engine.build_evidence(
+                        symbol
+                    )
                 except Exception:
                     pass
 
