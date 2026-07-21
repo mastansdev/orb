@@ -152,6 +152,30 @@ class TradeSelectionEngine:
                 except Exception as e:
                     print(f"[EVENT] {e}")
 
+        # ---------------------------------
+        # Sector-sensitivity fan-out (2026-07-21)
+        # ---------------------------------
+        # MACRO/COMMODITY stories almost never match a specific
+        # symbol (event_intelligence.process_story creates a
+        # symbol="" market-wide record for these, which nothing
+        # else consumes -- a broad "crude oil surges" story was
+        # simply going nowhere). This is where it actually goes
+        # somewhere: check the story against every stock's
+        # sector sensitivity (intelligence/sector_sensitivity.py)
+        # and fan out DIRECTIONAL evidence to the stocks it's
+        # genuinely relevant to. Never guesses -- both a matched
+        # commodity/currency keyword AND a clearly-stated
+        # direction (rising/falling, dollar strengthening/
+        # weakening) are required, or nothing is emitted.
+        if self.company_intelligence is not None:
+            for story in self.brain.pending_stories:
+                try:
+                    new_evidence.extend(
+                        self._sensitivity_fanout(story)
+                    )
+                except Exception as e:
+                    print(f"[SENSITIVITY] {e}")
+
         # Refresh the rolling cache (30-min window)
         now = _dt.now()
         self._news_evidence_cache = [
@@ -160,6 +184,169 @@ class TradeSelectionEngine:
         ] + [(now, ev) for ev in new_evidence]
 
         return [ev for _, ev in self._news_evidence_cache]
+
+    # --------------------------------------------------
+    # Sector-sensitivity fan-out helpers (2026-07-21)
+    # --------------------------------------------------
+
+    _COMMODITY_UP = (
+        "surge", "surges", "surging", "jump", "jumps", "jumping",
+        "rally", "rallies", "rallying", "soar", "soars", "soaring",
+        "spike", "spikes", "spiking", "rise", "rises", "rising",
+        "climb", "climbs", "climbing", "hits high", "record high",
+        "hits a high", "at a high",
+    )
+    _COMMODITY_DOWN = (
+        "crash", "crashes", "crashing", "plunge", "plunges",
+        "plunging", "tumble", "tumbles", "tumbling", "slump",
+        "slumps", "slumping", "fall", "falls", "falling",
+        "decline", "declines", "declining", "drop", "drops",
+        "dropping", "sink", "sinks", "sinking", "hits low",
+        "record low", "hits a low", "at a low",
+    )
+
+    # USD/INR direction only (the dominant, most-covered pair
+    # in Indian financial news). Other currencies in the
+    # taxonomy (yen, euro, gbp, yuan) deliberately have NO
+    # direction detection yet -- guessing their direction from
+    # generic keywords would be exactly the kind of fabrication
+    # this codebase avoids. Extend this explicitly, pair by
+    # pair, when there's a real headline pattern to test
+    # against -- not before.
+    _DOLLAR_UP = (
+        "dollar strengthens", "dollar rises", "dollar gains",
+        "dollar surges", "dollar firms", "rupee weakens",
+        "rupee falls", "rupee depreciates", "rupee slips",
+        "rupee slides", "rupee tumbles", "rupee hits low",
+        "rupee at record low", "rupee declines",
+    )
+    _DOLLAR_DOWN = (
+        "dollar weakens", "dollar falls", "dollar declines",
+        "dollar slips", "rupee strengthens", "rupee gains",
+        "rupee appreciates", "rupee rises", "rupee firms",
+        "rupee hits high", "rupee climbs",
+    )
+
+    def _detect_commodity_direction(self, text):
+        if any(kw in text for kw in self._COMMODITY_UP):
+            return "up"
+        if any(kw in text for kw in self._COMMODITY_DOWN):
+            return "down"
+        return None
+
+    def _detect_dollar_direction(self, text):
+        if any(kw in text for kw in self._DOLLAR_UP):
+            return "up"
+        if any(kw in text for kw in self._DOLLAR_DOWN):
+            return "down"
+        return None
+
+    def _sensitivity_fanout(self, story):
+        """
+        For one MACRO/COMMODITY-category story, fan out
+        directional evidence to every stock whose sector/
+        industry sensitivity (see sector_sensitivity.py)
+        matches a commodity/currency mentioned in the story
+        AND has a clearly-stated direction. Returns a list of
+        Evidence (possibly empty -- most stories won't match
+        anything, and that's the correct, honest outcome).
+        """
+        from intelligence.evidence import Evidence
+
+        category = str(getattr(story, "category", "") or "").upper()
+        if category not in ("MACRO", "COMMODITY"):
+            return []
+
+        text = str(getattr(story, "name", "") or "").lower()
+        if not text:
+            return []
+
+        commodity_dir = self._detect_commodity_direction(text)
+        dollar_dir = self._detect_dollar_direction(text)
+
+        if commodity_dir is None and dollar_dir is None:
+            return []
+
+        headline = (getattr(story, "name", "") or "")[:150]
+        confidence = float(getattr(story, "confidence", 50) or 50)
+
+        out = []
+
+        for symbol, profile in self.company_intelligence.profiles.items():
+            sector = profile.get("sector", "")
+            industry = profile.get("industry", "")
+            if not sector:
+                continue
+
+            sens = self.company_intelligence.get_sensitivity(symbol)
+
+            stock_direction = None
+            matched_factor = None
+
+            if commodity_dir is not None:
+                for factor, exposure in sens.get("commodities", {}).items():
+                    if factor not in text:
+                        continue
+                    # cost side: rising commodity = headwind (SELL-leaning)
+                    # revenue side: rising commodity = tailwind (BUY-leaning)
+                    if exposure == "cost":
+                        stock_direction = (
+                            "SELL" if commodity_dir == "up" else "BUY"
+                        )
+                    elif exposure == "revenue":
+                        stock_direction = (
+                            "BUY" if commodity_dir == "up" else "SELL"
+                        )
+                    matched_factor = factor
+                    break
+
+            if stock_direction is None and dollar_dir is not None:
+                for factor, exposure in sens.get("currencies", {}).items():
+                    if factor not in text:
+                        continue
+                    # exporter: dollar strength (rupee weak) = tailwind
+                    # importer: dollar strength (rupee weak) = headwind
+                    if exposure == "exporter":
+                        stock_direction = (
+                            "BUY" if dollar_dir == "up" else "SELL"
+                        )
+                    elif exposure == "importer":
+                        stock_direction = (
+                            "SELL" if dollar_dir == "up" else "BUY"
+                        )
+                    matched_factor = factor
+                    break
+
+            if stock_direction is None:
+                continue
+
+            out.append(
+                Evidence(
+                    provider="SENSITIVITY",
+                    symbol=symbol,
+                    recommendation=stock_direction,
+                    score=min(60, confidence * 0.6),
+                    confidence=min(60, confidence * 0.6),
+                    reason=(
+                        f"{sector} sector sensitivity to "
+                        f"'{matched_factor}': {headline}"
+                    ),
+                    facts={
+                        "sector": sector,
+                        "industry": industry,
+                        "matched_factor": matched_factor,
+                        "story_category": category,
+                    },
+                )
+            )
+
+        if out:
+            print(
+                f"[SENSITIVITY] '{headline[:60]}' fanned out to "
+                f"{len(out)} stock(s)"
+            )
+
+        return out
 
     # --------------------------------------------------
 
@@ -272,7 +459,22 @@ class TradeSelectionEngine:
         # ingest cycle (the engine also calls ingest_news
         # on a timer — see Engine.process_tick — so the
         # watchlist builds even on days with no breakouts).
-        news_evidence = self.ingest_news()
+        #
+        # Fix (2026-07-21): ingest_news() returns the GLOBAL
+        # 30-min rolling cache across ALL symbols -- filter
+        # to just this symbol's own news here. Before the
+        # symbol-tagging fix upstream (Brain.build_news_
+        # evidence / NewsEvidenceBuilder.build), this filter
+        # would have silently dropped everything, since every
+        # item carried symbol="". Now that evidence is
+        # correctly tagged, this is what actually scopes news
+        # to the stock it's about instead of applying any
+        # recent news to every stock being evaluated.
+        symbol_upper = symbol.upper()
+        news_evidence = [
+            ev for ev in self.ingest_news()
+            if ev.symbol.upper() == symbol_upper
+        ]
 
         # ---------------------------------
         # Pattern Evidence (memory-driven)

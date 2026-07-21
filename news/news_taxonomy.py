@@ -232,6 +232,40 @@ CATEGORY_KEYWORDS = {
         "bernstein",
         "macquarie"
 
+    ],
+
+    # ======================================================
+    # AI Disruption / Opportunity (added 2026-07-21)
+    # Own top-level category (like BROKERAGE above) rather
+    # than folded into CORPORATE -- keeps category/subcategory
+    # /event_type consistent for impact_rules.py's 3-way match
+    # (see news/impact_engine.py._find_rule -- all three must
+    # agree or the rule silently never fires, the same
+    # consistency issue already fixed for BROKERAGE tonight).
+    # ======================================================
+
+    "AI_IMPACT": [
+
+        "ai-led layoffs",
+        "layoffs due to ai",
+        "automation-led job cuts",
+        "headcount reduction citing ai",
+        "client in-house ai",
+        "insourcing due to ai",
+        "ai replaces jobs",
+        "ai to replace",
+        "cuts jobs amid ai",
+        "workforce reduction ai",
+        "wins ai deal",
+        "ai-led deal win",
+        "launches ai platform",
+        "ai revenue growth",
+        "generative ai contract",
+        "ai partnership",
+        "large ai deal",
+        "artificial intelligence deal",
+        "genai contract"
+
     ]
 
 }
@@ -379,6 +413,38 @@ SUBCATEGORY_KEYWORDS = {
         "cuts target",
         "overweight",
         "underweight",
+    ],
+
+    # --------------------------------------------------
+    # AI Disruption / Opportunity (added 2026-07-21)
+    # Company-specific, not sector-wide -- this is what
+    # actually reacts to "AI is replacing service-based IT
+    # jobs" for a NAMED company, distinct from the sector-
+    # sensitivity mechanism (which handles commodity/currency
+    # exposure, not structural/technological disruption).
+    # --------------------------------------------------
+
+    "AI_DISRUPTION": [
+        "ai-led layoffs",
+        "layoffs due to ai",
+        "automation-led job cuts",
+        "headcount reduction citing ai",
+        "client in-house ai",
+        "insourcing due to ai",
+        "ai replaces jobs",
+        "ai to replace",
+        "cuts jobs amid ai",
+        "workforce reduction ai",
+    ],
+
+    "AI_OPPORTUNITY": [
+        "wins ai deal",
+        "ai-led deal win",
+        "launches ai platform",
+        "ai revenue growth",
+        "generative ai contract",
+        "ai partnership",
+        "large ai deal",
     ],
 }
 
@@ -615,6 +681,35 @@ EVENT_TYPE_KEYWORDS = {
         "initiates coverage",
         "initiates coverage with buy",
         "initiates coverage with sell",
+    ],
+
+    # --------------------------------------------------
+    # AI Disruption / Opportunity (added 2026-07-21)
+    # --------------------------------------------------
+
+    "AI_DISRUPTION_RISK": [
+        "ai-led layoffs",
+        "layoffs due to ai",
+        "automation-led job cuts",
+        "headcount reduction citing ai",
+        "client in-house ai",
+        "insourcing due to ai",
+        "ai replaces jobs",
+        "ai to replace",
+        "cuts jobs amid ai",
+        "workforce reduction ai",
+    ],
+
+    "AI_OPPORTUNITY_WIN": [
+        "wins ai deal",
+        "ai-led deal win",
+        "launches ai platform",
+        "ai revenue growth",
+        "generative ai contract",
+        "ai partnership",
+        "large ai deal",
+        "artificial intelligence deal",
+        "genai contract",
     ],
 
 }

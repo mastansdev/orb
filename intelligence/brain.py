@@ -480,24 +480,48 @@ class Brain:
         Convert newly received institutional impacts
         into Brain Evidence.
         Railway no longer owns this responsibility.
+
+        Fix (2026-07-21): this used to build ONE evidence
+        item per story with no symbol attached, which meant
+        it silently applied to every stock's conviction score
+        instead of just the stock(s) the story was actually
+        about. Now builds one evidence item PER AFFECTED
+        SYMBOL (same pattern event_intelligence.py already
+        uses for structured events), and skips stories with
+        no matched symbol entirely -- a symbol-less macro/
+        commodity story isn't noise to discard, it's handled
+        separately by TradeSelectionEngine's sensitivity
+        fan-out (see ingest_news()), which decides WHICH
+        stocks a broad market story actually matters for.
         """
 
         evidence_list = []
 
         for story in self.pending_stories:
+            symbols = getattr(story, "affected_symbols", None) or []
+            if isinstance(symbols, str):
+                symbols = [symbols]
+            if not symbols:
+                continue
+
             impact = self.impact_engine.evaluate(
                 story
             )
 
-            evidence = self.news_evidence_builder.build(
-                story,
-                impact
-            )
+            for symbol in symbols:
+                if not symbol:
+                    continue
 
-            evidence_list.append(
-                evidence
-            )
-            
+                evidence = self.news_evidence_builder.build(
+                    story,
+                    impact,
+                    symbol=str(symbol).upper(),
+                )
+
+                evidence_list.append(
+                    evidence
+                )
+
         return evidence_list
         
         

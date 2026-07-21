@@ -219,6 +219,21 @@ class CompanyIntelligence:
             except Exception:
                 pass
 
+        # Free, already-available enrichment (2026-07-21):
+        # peer group + sector macro sensitivity. Both come
+        # from data the bot already has loaded -- no new
+        # source, no network call, safe to compute on every
+        # dossier request.
+        try:
+            profile["competitors"] = self.get_competitors(symbol)
+        except Exception:
+            profile["competitors"] = []
+
+        try:
+            profile["sensitivity"] = self.get_sensitivity(symbol)
+        except Exception:
+            profile["sensitivity"] = {}
+
         return profile
 
     # --------------------------------------------------
@@ -393,6 +408,61 @@ class CompanyIntelligence:
         ]
 
     # --------------------------------------------------
+    # PUBLIC : Competitors / Peer Group  (added 2026-07-21)
+    # --------------------------------------------------
+    #
+    # Free, already-available data: the sector/industry
+    # mapping for all 750 stocks already lives in
+    # master_loader (loaded from Masterdata/master_database
+    # .xlsx). This was never exposed as a per-stock
+    # "competitors" list before -- no new data source
+    # needed, just wiring what's already there.
+
+    def get_competitors(self, symbol, limit=10):
+        """
+        Peer companies for `symbol`. Prefers the tighter
+        industry grouping (e.g. "Private Banks") over the
+        broader sector (e.g. "Banking") when available,
+        since industry peers are more genuinely comparable.
+        Never fabricates a peer list for an unmapped symbol
+        -- returns [] instead.
+        """
+        from core.master_loader import master_loader
+
+        symbol = symbol.upper()
+        industry = master_loader.get_industry(symbol)
+        sector = master_loader.get_sector(symbol)
+
+        peers = []
+        if industry:
+            peers = master_loader.get_industry_symbols(industry)
+        if not peers and sector:
+            peers = master_loader.get_sector_symbols(sector)
+
+        return [
+            p for p in peers
+            if p.upper() != symbol
+        ][:limit]
+
+    # --------------------------------------------------
+    # PUBLIC : Sector Sensitivity  (added 2026-07-21)
+    # --------------------------------------------------
+    #
+    # Curated commodity/currency/government sensitivity per
+    # sector -- see intelligence/sector_sensitivity.py for
+    # the full taxonomy and why this is domain knowledge,
+    # not a live data feed pretending to be one.
+
+    def get_sensitivity(self, symbol):
+        from intelligence.sector_sensitivity import get_sensitivity
+
+        profile = self.get_profile(symbol)
+        return get_sensitivity(
+            profile.get("sector", ""),
+            profile.get("industry", ""),
+        )
+
+    # --------------------------------------------------
 
     def report(self, symbol):
         """
@@ -411,6 +481,33 @@ class CompanyIntelligence:
             f"Themes   : {', '.join(profile.get('themes', [])) or '—'}",
             f"F&O      : {profile.get('fno', '—')}",
         ]
+
+        competitors = profile.get("competitors") or []
+        if competitors:
+            lines.append(
+                f"Peers    : {', '.join(competitors[:8])}"
+            )
+
+        sensitivity = profile.get("sensitivity") or {}
+        sens_parts = []
+        if sensitivity.get("commodities"):
+            sens_parts.append(
+                "commodities: "
+                + ", ".join(sensitivity["commodities"])
+            )
+        if sensitivity.get("currencies"):
+            sens_parts.append(
+                "currencies: "
+                + ", ".join(sensitivity["currencies"])
+            )
+        if sensitivity.get("government"):
+            sens_parts.append(
+                f"government: {sensitivity['government']}"
+            )
+        if sens_parts:
+            lines.append(
+                "Sensitive to : " + " | ".join(sens_parts)
+            )
 
         # Living intelligence
         if profile.get("last_event_at"):

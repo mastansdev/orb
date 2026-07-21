@@ -14,11 +14,21 @@ class NewsEvidenceBuilder:
     def build(
         self,
         story,
-        impact
+        impact,
+        symbol="",
     ):
         """
         Build Brain Evidence from
         Market Story + Impact.
+
+        Fix (2026-07-21): `symbol` was never passed here --
+        every MARKET_STORY evidence item carried symbol=""
+        (Evidence's own default), and nothing downstream
+        filtered on it, so ANY news about ANY stock was being
+        applied to EVERY stock's conviction score for the
+        30-minute cache window. Now the caller (Brain.
+        build_news_evidence) passes the actual symbol this
+        evidence is for, one call per affected symbol.
         """
         # --------------------------------------------------
         # Recommendation
@@ -49,6 +59,7 @@ class NewsEvidenceBuilder:
         # --------------------------------------------------
         return Evidence(
             provider="MARKET_STORY",
+            symbol=symbol,
             recommendation=recommendation,
             score=score,
             confidence=max(

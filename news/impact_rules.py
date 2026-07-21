@@ -681,6 +681,55 @@ CORPORATE_EVENT_RULES = {
         "historical_winners": [],
         "historical_losers": [],
     },
+
+    # --------------------------------------------------
+    # AI Disruption / Opportunity (added 2026-07-21)
+    # Company-specific structural risk/opportunity from AI --
+    # e.g. a client in-housing work with AI, or headcount
+    # cuts tied to automation, vs a company winning a large
+    # AI-related contract or launching an AI platform. This
+    # is DIFFERENT from sector_sensitivity.py's commodity/
+    # currency mechanism -- it's a dated, company-specific
+    # event, not a standing sector-wide exposure.
+    # --------------------------------------------------
+    "AI_DISRUPTION_RISK": {
+        "category": "AI_IMPACT",
+        "sub_category": "AI_DISRUPTION",
+        "event_type": "AI_DISRUPTION_RISK",
+        "market_impact": IMPACT_MEDIUM,
+        "market_score": 0,
+        "sector_score": -1,
+        "stock_score": -6,
+        "confidence": 75,
+        "confidence_source": "MEDIA",
+        "market_regime_hint": REGIME_NEUTRAL,
+        "expected_duration": DURATION_LONG,
+        "direct_assets": ["SPECIFIC_STOCK"],
+        "indirect_assets": ["SECTOR_PEERS"],
+        "bullish_sectors": [],
+        "bearish_sectors": [],
+        "historical_winners": [],
+        "historical_losers": ["LABOUR_ARBITRAGE_MODELS"],
+    },
+    "AI_OPPORTUNITY_WIN": {
+        "category": "AI_IMPACT",
+        "sub_category": "AI_OPPORTUNITY",
+        "event_type": "AI_OPPORTUNITY_WIN",
+        "market_impact": IMPACT_MEDIUM,
+        "market_score": 0,
+        "sector_score": 1,
+        "stock_score": 5,
+        "confidence": 75,
+        "confidence_source": "MEDIA",
+        "market_regime_hint": REGIME_NEUTRAL,
+        "expected_duration": DURATION_MEDIUM,
+        "direct_assets": ["SPECIFIC_STOCK"],
+        "indirect_assets": [],
+        "bullish_sectors": [],
+        "bearish_sectors": [],
+        "historical_winners": ["AI_ENABLERS"],
+        "historical_losers": [],
+    },
 }
 
 # ==================================================
