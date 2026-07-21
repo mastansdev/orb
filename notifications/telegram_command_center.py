@@ -488,7 +488,7 @@ class TelegramCommandCenter:
 
     def cmd_fetch_results(self, args):
         self.engine.telegram.send(
-            "📅 Fetching BSE results calendar…"
+            "📅 Fetching results calendar (BSE + NSE)…"
         )
         added = self.engine.fetch_results_calendar()
         self.engine.telegram.send(

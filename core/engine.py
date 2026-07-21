@@ -74,6 +74,7 @@ from intelligence.reaction_decay import ReactionDecayEngine
 from trading.shock_responder import ShockResponder
 from collectors.results_calendar_collector import (
     ResultsCalendarCollector,
+    NseResultsCalendarCollector,
 )
 
 from intelligence.intelligence_context import IntelligenceContext
@@ -506,6 +507,23 @@ class Engine:
             target=self.results_collector.fetch,
             daemon=True,
             name="ResultsCalendarFetch",
+        ).start()
+
+        # Second, independent calendar source (2026-07-21).
+        # BSE's fetch above has been observed failing to
+        # connect from cloud origins -- rather than rely on
+        # a single source, NSE's own board-meetings feed
+        # runs alongside it. Both write into the SAME
+        # results_calendar; neither depends on the other.
+        self.nse_results_collector = NseResultsCalendarCollector(
+            results_calendar=self.results_calendar,
+            harvester=self.calendar_harvester,
+            company_intelligence=self.company_intelligence,
+        )
+        _threading.Thread(
+            target=self.nse_results_collector.fetch,
+            daemon=True,
+            name="NseResultsCalendarFetch",
         ).start()
 
         self.trade_selection_engine.attach_intelligence(
@@ -2521,17 +2539,34 @@ class Engine:
     # --------------------------------------------------
 
     def fetch_results_calendar(self):
-        return self.results_collector.fetch()
+        """
+        Runs BOTH independent sources (BSE + NSE) and
+        returns the combined count. Either one failing
+        (e.g. a connection block) does not stop the other
+        from populating the calendar.
+        """
+        bse_added = 0
+        nse_added = 0
+        try:
+            bse_added = self.results_collector.fetch()
+        except Exception as e:
+            print(f"[CALENDAR] BSE collector error: {e}")
+        try:
+            nse_added = self.nse_results_collector.fetch()
+        except Exception as e:
+            print(f"[CALENDAR-NSE] NSE collector error: {e}")
+        return bse_added + nse_added
 
     # --------------------------------------------------
 
     def refresh_results_calendar(self):
         """
         Purge future entries (bad/stale matches) and
-        re-fetch with strict matching + dedupe.
+        re-fetch with strict matching + dedupe, from both
+        sources (BSE + NSE).
         """
         removed = self.results_calendar.clear_future()
-        added = self.results_collector.fetch()
+        added = self.fetch_results_calendar()
         self.results_calendar.dedupe()
         return removed, added
 
