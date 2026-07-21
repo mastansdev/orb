@@ -107,7 +107,9 @@ class RiskGovernor:
 
         # One-time alert guards
         self._loss_alert_sent = False
-        self._profit_alert_sent = False
+        # _profit_alert_sent removed (2026-07-21): profit lock
+        # now goes through _lock(), which is already idempotent
+        # via self.locked — no separate one-shot flag needed.
 
     # --------------------------------------------------
     # Internal helpers
@@ -432,17 +434,25 @@ class RiskGovernor:
             return False, "Daily loss limit", None
 
         # ---------------------------------
-        # 3. Daily profit lock (soft: entries only)
+        # 3. Daily profit lock (hard: same kill switch as
+        #    the loss lockout — 2026-07-21 fix)
         # ---------------------------------
+        # Was soft: paused new entries but left winners open.
+        # User's explicit rule: once day MTM hits the target,
+        # STOP trading for the day AND book every open
+        # position — don't let a good day round-trip while
+        # "still managing" positions after the target is hit.
+        # Reuses _lock(), the exact same irreversible kill
+        # switch the loss lockout uses, so both sides of the
+        # day behave identically (and KILL_SWITCH_EXIT_ALL
+        # governs both consistently instead of profit having
+        # its own weaker rule).
         if day_pnl >= abs(self.daily_max_profit):
-            if not self._profit_alert_sent:
-                self._profit_alert_sent = True
-                self.trade_controller.disable_entries()
-                self._notify(
-                    f"Daily profit target reached "
-                    f"(₹{day_pnl:.0f}). New entries paused. "
-                    f"Open positions continue to be managed."
-                )
+            self._lock(
+                f"Daily profit target reached "
+                f"(₹{day_pnl:.0f} ≥ ₹{self.daily_max_profit:.0f}) "
+                f"— booking all open positions"
+            )
             self.entries_blocked += 1
             return False, "Daily profit target reached", None
 

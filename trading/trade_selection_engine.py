@@ -1147,7 +1147,10 @@ class TradeSelectionEngine:
         READ-ONLY current conviction for a symbol —
         no brain, no pool, no side effects. Used by the
         HOLD brain to re-evaluate open-position theses.
-        Returns a 0-100 conviction score (0 on failure).
+        Returns a 0-100 conviction score, or None if the
+        rebuild itself failed (distinct from a genuine 0 —
+        see the except block below for why that distinction
+        matters).
 
         Fix (2026-07-21): this used to rebuild evidence from
         only 5 of the 10 sources evaluate() uses at entry --
@@ -1229,8 +1232,23 @@ class TradeSelectionEngine:
                 validated
             )
             return float(snapshot.get("score") or 0)
-        except Exception:
-            return 0.0
+        except Exception as e:
+            # Fix (2026-07-21): this used to return 0.0 here,
+            # identically to a stock that genuinely has zero
+            # conviction left. Since 0.0 is always below
+            # entry_conviction * THESIS_DECAY_FRACTION, a plain
+            # code bug (evidence_builder/validator/conviction_
+            # engine throwing) was indistinguishable from "the
+            # thesis genuinely died" -- it would silently force
+            # a real THESIS_EXIT on a live position, with a
+            # confident-looking "thesis decayed" message and
+            # zero trace of the actual failure. Return None
+            # instead so the caller (PositionThesisEngine.advise)
+            # can tell "no real answer" apart from "real answer
+            # is zero" and fall back to HOLD, and print the
+            # real reason so it isn't silent either.
+            print(f"[SCORE_SYMBOL] {symbol}: {e}")
+            return None
 
     # --------------------------------------------------
 

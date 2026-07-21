@@ -92,6 +92,15 @@ class PositionThesisEngine:
         except Exception:
             return {"action": "HOLD", "reason": "score failed"}
 
+        # Fix (2026-07-21): score_symbol() returns None (not
+        # 0.0) when the rebuild itself crashed internally,
+        # specifically so a code failure can't masquerade as
+        # "conviction genuinely hit zero" and force a real
+        # exit on a live position over a bug. Treat that the
+        # same as the except above: hold, don't decide.
+        if current is None:
+            return {"action": "HOLD", "reason": "score failed"}
+
         floor = entry_conviction * THESIS_DECAY_FRACTION
 
         if current < floor:

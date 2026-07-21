@@ -48,6 +48,19 @@ def test_stoploss():
 
 
 def test_target():
+    """
+    Fix (2026-07-21): reaching the nominal target no longer
+    force-closes the position -- it's now informational only
+    (trade["target_reached"]), and the trade stays ACTIVE so
+    dynamic_trade_manager.py's partial-booking and progressive
+    trailing stop actually get to manage it (they never did
+    before: the old hard TARGET close fired at the exact same
+    1R level as PARTIAL_BOOK_AT_R, winning the race every
+    time). This is "true trailing runner, no fixed cap" by
+    the user's explicit choice -- the trade now only ends via
+    STOPLOSS/trail, the hard time exit, or a catalyst/thesis
+    exit, never by "hit a number, close it."
+    """
 
     risk = RiskManager()
 
@@ -62,9 +75,11 @@ def test_target():
         "10:00:00"
     )
 
-    assert result == "TARGET"
+    assert result == "ACTIVE"
+    assert trade["target_reached"] is True
+    assert trade["active"] is True
 
-    print("✅ Target Passed")
+    print("✅ Target (informational, no forced close) Passed")
 
 
 def test_breakeven_before_target():

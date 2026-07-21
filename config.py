@@ -108,7 +108,16 @@ MIN_ORB_RANGE_PERCENT = 1.0
 # Governor further scales these by live market regime.
 
 DAILY_MAX_LOSS_PCT = 0.03     # stop the day at -3% of equity
-DAILY_MAX_PROFIT_PCT = 0.06   # lock the day at +6% of equity
+
+# Fix (2026-07-21): user's explicit rule — once day MTM hits
+# a flat ₹1,00,000, stop trading for the day AND square off
+# every open position (not just pause new entries). At the
+# current 10L capital profile, 10% = exactly ₹1,00,000. This
+# stays proportional (like DAILY_MAX_LOSS_PCT above) so it
+# scales correctly if CAPITAL_PROFILE ever changes — revisit
+# this % if you want it pinned to a literal ₹1L regardless of
+# account size.
+DAILY_MAX_PROFIT_PCT = 0.10   # lock the day at +10% of equity (= ₹1,00,000 at 10L)
 
 DAILY_MAX_LOSS = int(CAPITAL * DAILY_MAX_LOSS_PCT)
 DAILY_MAX_PROFIT = int(CAPITAL * DAILY_MAX_PROFIT_PCT)
