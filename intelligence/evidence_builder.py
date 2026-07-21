@@ -58,19 +58,18 @@ class EvidenceBuilder:
 
         symbol_snapshot = intelligence.get("symbol", {})
 
-        print("\n========== INDUSTRY SNAPSHOT ==========")
-        print(symbol_snapshot.get("industry"))
-        print("=======================================\n")
+        # Removed 2026-07-21: unconditional debug dumps that fired
+        # on EVERY evaluate() call, all day -- part of the terminal
+        # flood that made it impossible to see what mattered during
+        # market hours. Not needed for normal operation; if this
+        # snapshot needs inspecting again, print it deliberately
+        # (e.g. behind a one-off debug flag) rather than always-on.
 
         market_snapshot = intelligence.get("market", {})
 
         # --- Sector Analysis ---
         sector_snapshot = symbol_snapshot.get("sector")
 
-        print("\n========== SECTOR SNAPSHOT ==========")
-        print(sector_snapshot)
-        print("====================================\n")
-        
         if sector_snapshot:
             evidence.append(
                 self._create_evidence(

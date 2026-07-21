@@ -178,6 +178,60 @@ CATEGORY_KEYWORDS = {
         "interest rate",
         "tariff"
 
+    ],
+
+    # ======================================================
+    # Brokerage Notes / Analyst Ratings
+    # (added 2026-07-21 — this category didn't exist; every
+    # brokerage note was falling through unclassified. These
+    # arrive via the same RSS/news feeds already collected,
+    # no new data source needed.)
+    # ======================================================
+
+    "BROKERAGE": [
+
+        "brokerage",
+        "target price",
+        "price target",
+        "maintains buy",
+        "maintains sell",
+        "maintains hold",
+        "maintains outperform",
+        "maintains underperform",
+        "upgrades to buy",
+        "upgrades to outperform",
+        "downgrades to sell",
+        "downgrades to hold",
+        "downgrades to underperform",
+        "initiates coverage",
+        "reiterates buy",
+        "raises target",
+        "cuts target",
+        "overweight",
+        "underweight",
+        "motilal oswal",
+        "icici securities",
+        "kotak institutional",
+        "hdfc securities",
+        "nomura",
+        "clsa",
+        "morgan stanley",
+        "goldman sachs",
+        "jefferies",
+        "jm financial",
+        "nuvama",
+        "antique stock broking",
+        "prabhudas lilladher",
+        "emkay global",
+        "axis securities",
+        "sharekhan",
+        "edelweiss",
+        "systematix",
+        "elara capital",
+        "citi research",
+        "bernstein",
+        "macquarie"
+
     ]
 
 }
@@ -305,6 +359,26 @@ SUBCATEGORY_KEYWORDS = {
         "ed investigation",
         "sfio",
         "cbi",
+    ],
+
+    # --------------------------------------------------
+    # Brokerage Notes / Analyst Ratings
+    # --------------------------------------------------
+
+    "BROKERAGE_ACTION": [
+        "target price",
+        "price target",
+        "maintains buy",
+        "maintains sell",
+        "maintains hold",
+        "upgrades to",
+        "downgrades to",
+        "initiates coverage",
+        "reiterates buy",
+        "raises target",
+        "cuts target",
+        "overweight",
+        "underweight",
     ],
 }
 
@@ -502,6 +576,45 @@ EVENT_TYPE_KEYWORDS = {
         "ed investigation",
         "sfio",
         "cbi investigation",
+    ],
+
+    # --------------------------------------------------
+    # Brokerage Notes / Analyst Ratings
+    # --------------------------------------------------
+
+    "BROKERAGE_UPGRADE": [
+        "upgrades to buy",
+        "upgrades to outperform",
+        "upgraded to buy",
+        "upgrade to overweight",
+    ],
+
+    "BROKERAGE_DOWNGRADE": [
+        "downgrades to sell",
+        "downgrades to hold",
+        "downgrades to underperform",
+        "downgraded to sell",
+        "downgrade to underweight",
+    ],
+
+    "BROKERAGE_TARGET_RAISED": [
+        "raises target",
+        "raises target price",
+        "hikes target price",
+        "target price raised",
+    ],
+
+    "BROKERAGE_TARGET_CUT": [
+        "cuts target",
+        "cuts target price",
+        "target price cut",
+        "lowers target price",
+    ],
+
+    "BROKERAGE_INITIATION": [
+        "initiates coverage",
+        "initiates coverage with buy",
+        "initiates coverage with sell",
     ],
 
 }

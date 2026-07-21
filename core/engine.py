@@ -935,12 +935,41 @@ class Engine:
                         if brain:
                             action_obj = getattr(brain, "action", None)
                             action_val = action_obj.value if hasattr(action_obj, "value") else action_obj
-                            
+
                             print(f"❌ BRAIN REJECTED : {symbol}")
                             print(f"Action  : {action_val if action_val is not None else 'N/A'}")
                             print(f"Reasons : {getattr(brain, 'reasons', 'N/A')}\n")
                         else:
                             print(f"❌ ENGINE SKIPPED : {symbol} - Reason: {decision.get('reasons', ['Fallback criteria not met'])}")
+
+                        # Fix (2026-07-21): rejections were never
+                        # persisted anywhere -- only completed trades
+                        # got a save_decision() call, so /why SYMBOL
+                        # could never explain a MISS, only a trade
+                        # that actually happened. Same repository,
+                        # same table (trade_decisions already
+                        # supports action="REJECT" by design -- it
+                        # was simply never called with it).
+                        try:
+                            reasons_list = decision.get("reasons") or []
+                            reason_text = (
+                                "; ".join(str(r) for r in reasons_list[:3])
+                                if reasons_list
+                                else "no reason recorded"
+                            )
+                            conviction_val = (
+                                getattr(brain, "score", 0) if brain else 0
+                            )
+                            self.market_memory.repository.save_decision(
+                                symbol=symbol,
+                                action="REJECT",
+                                reason=reason_text,
+                                conviction=conviction_val or 0,
+                                evidence=reason_text,
+                            )
+                        except Exception as e:
+                            print(f"[DECISION LOG] reject-save failed: {e}")
+
                         return
 
                     # Validate macro structural layout risk constraints

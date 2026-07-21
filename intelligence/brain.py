@@ -716,10 +716,26 @@ class Brain:
             # Sector
             # ----------------------------
 
-            if provider == "SECTOR":
+            # Fix (2026-07-21): two compounding bugs kept this
+            # branch from EVER firing. (1) evidence_builder.py
+            # emits provider="sector" (lowercase) but this
+            # checked "SECTOR" (uppercase) — never matched.
+            # (2) even matched, sector_engine.py's snapshot key
+            # is "name", not "sector_name" — always fell back
+            # to "UNKNOWN". Net effect: dominant_sector was
+            # ALWAYS empty/"UNKNOWN", so risk_governor.py's
+            # `if sector:` sector-cap check silently no-opped
+            # for every candidate (looked like it was blocking
+            # on "unknown sector" when it was actually just
+            # skipping the check).
+            if provider.upper() == "SECTOR":
 
                 intelligence.sector_strength = score
-                intelligence.dominant_sector = facts.get("sector_name", "UNKNOWN")
+                intelligence.dominant_sector = (
+                    facts.get("sector_name")
+                    or facts.get("name")
+                    or "UNKNOWN"
+                )
 
             # ----------------------------
             # Industry

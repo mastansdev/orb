@@ -69,7 +69,11 @@ RISK_MODE = "PERCENT"        # PERCENT / FIXED
 RISK_PER_TRADE = 0.01        # 1% of CAPITAL (equity, not BP)
 FIXED_RISK = 1000            #  Used when RISK_MODE = "FIXED"
 
-MAX_OPEN_POSITIONS = 25
+# Sized to match MAX_PORTFOLIO_HEAT below (target: 8
+# concurrent positions, confirmed 2026-07-21). Was 25 —
+# meaningless ceiling since heat capped the book at ~3-5
+# in practice; now the two numbers agree.
+MAX_OPEN_POSITIONS = 8
 
 
 # ==========================
@@ -86,7 +90,10 @@ LIVE_CAPITAL = 10000000
 MIN_PRICE = 200
 ENTRY_BUFFER_PCT = 0.1   # 0.1% above ORB high — replaces old flat-rupee ENTRY_BUFFER
 ORB_BUFFER = 2.0
-MAX_BREAKOUT_PERCENT = 1.0
+MAX_BREAKOUT_PERCENT = 3.0   # was 1.0 — too tight, rejected genuine strong
+# breakouts (Bluestone, Karur Vysya-style movers) before the candle even
+# closed. 3.0 still blocks chasing a fully blown-out move, but stops
+# auto-rejecting real momentum in the first minutes after ORB completes.
 RISK_REWARD = 1.0
 TRAIL_STEP = 1.0
 MIN_QTY = 10
@@ -132,9 +139,13 @@ MAX_POSITIONS_PER_SECTOR = 3
 
 # Maximum total open risk (sum of entry-to-stop distance
 # multiplied by quantity across open positions).
-# Scales with equity: max 5% of equity at risk across
-# all open positions simultaneously.
-MAX_PORTFOLIO_HEAT = int(CAPITAL * 0.05)
+# Sized for 8 concurrent positions at ~1% risk/trade each
+# (confirmed target 2026-07-21) = 8% of equity at risk
+# simultaneously. Was 5% (₹50,000) — silently capped the
+# book at ~3-5 positions and rejected the best entries once
+# hit, regardless of quality. MAX_OPEN_POSITIONS above is
+# now sized to match so the two limits agree.
+MAX_PORTFOLIO_HEAT = int(CAPITAL * 0.08)
 
 # ==========================
 # CONVICTION
@@ -173,9 +184,19 @@ RESULTS_DAY_BLOCK = True
 
 # Massive catalysts can trigger entry WITHOUT waiting
 # for an ORB breakout, any time before the cutoff.
-# OFF 2026-07-21: ONE trigger only — ORB breakout close
-# on a catalyst-armed stock. News arms; price triggers.
-EVENT_ENTRY_ENABLED = False
+# RE-ENABLED 2026-07-21: this IS the "Results/Events
+# watchlist fast-path" — a results-day stock that flips
+# WATCHING→ANNOUNCED (results_watchlist.py) or any symbol
+# with a strong fresh entry on the F&O catalyst watchlist
+# can enter on pre-open/opening strength without waiting
+# for the full 15-min ORB range to close. Real example that
+# forced this: Karur Vysya Bank moved 8% in the first 15
+# minutes on prior-day results — waiting for ORB completion
+# would have missed the entire move. Still scoped: needs
+# EVENT_ENTRY_MIN_IMPORTANCE, a fresh catalyst, and a HIGHER
+# conviction bar (EVENT_ENTRY_MIN_CONVICTION) than normal
+# ORB entries, since there's no price-structure confirmation.
+EVENT_ENTRY_ENABLED = True
 EVENT_ENTRY_MIN_IMPORTANCE = 75     # watchlist catalyst strength
 EVENT_ENTRY_MIN_CONVICTION = 65     # higher bar than ORB entries
 EVENT_ENTRY_FRESH_MINUTES = 45      # catalyst must be this fresh
@@ -252,10 +273,23 @@ PRICED_IN_FADE_PCT = 5.0
 # random universe-wide entries at 09:16. One trigger
 # only: ORB breakout close, catalyst-armed.
 
-# An ORB breakout may ONLY become a trade if the symbol
-# has LIVE catalyst evidence (news event, F&O catalyst,
-# announced result, causal chain, or graph sympathy).
-# Naked breakouts — price with no story — are blocked.
+# CHANGED 2026-07-21: was a HARD BLOCK — any ORB breakout
+# without a matched catalyst was rejected outright. Result:
+# 100+ genuine breakouts on 07-21 captured ZERO trades,
+# including moves with real catalysts the news pipeline
+# hadn't matched yet. This contradicted the bot's own
+# motto ("evidence contributes; conviction decides") by
+# making evidence a requirement instead of a booster.
+#
+# New behaviour: a genuine ORB breakout (passed the
+# structural ORB gate + MAX_BREAKOUT_PERCENT window) is
+# evaluated by the Brain by default. Catalyst evidence and
+# market-scan leader status still matter — they boost
+# conviction score, and a candidate with NEITHER still has
+# to clear CONVICTION_MIN_SCORE on its own (sector
+# strength, pattern history, relative strength, etc.) to
+# be selected. This flag now toggles whether catalyst/scan
+# status is computed and added as evidence at all.
 CATALYST_GATE_ENABLED = True
 
 # Evidence providers that count as a live catalyst.
@@ -284,6 +318,11 @@ CATALYST_MIN_SCORE = 25
 # conviction + Risk Governor. This is NOT the old momentum
 # path (no pre-9:30 entries, no 'any stock that moved
 # 1.5%' — only the day's real leaders).
+# CHANGED 2026-07-21: no longer a gate (see CATALYST_GATE_
+# ENABLED note above) — top-N leader status is now added as
+# evidence that boosts conviction, same as a news catalyst.
+# A breakout outside the top 20 can still trade on its own
+# merits (sector strength, pattern, relative strength).
 MARKET_SCAN_ENABLED = True
 MARKET_SCAN_TOP_N = 20          # today's leaders board size
 MARKET_SCAN_MIN_CHANGE_PCT = 2.0  # leader must be up ≥ this

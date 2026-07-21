@@ -540,49 +540,109 @@ def on_message(instance, tick):
         print("=======================================\n")
 
 
-feed = MarketFeed(
-    context,
-    instruments,
-    "v2",
-    on_connect=on_connect,
-    on_message=on_message,
-    on_error=on_error
-)
+# --------------------------------------------------
+# AUTO-RECONNECT WRAPPER (added 2026-07-21)
+#
+# Fix for the confirmed live failure: internet/feed outage
+# killed the process with no restart. feed.run() threw, hit
+# the old bare except block, sent one "connection lost"
+# Telegram message, and the process ended -- meaning
+# EVERYTHING downstream (tick processing, exits, the
+# square-off monitor) went silent until a human noticed and
+# manually restarted main.py. That day it took 34-38 minutes
+# for someone to notice and manually close 3 open positions
+# past HARD_EXIT_TIME.
+#
+# Fix: keep the SAME process alive and re-create + reconnect
+# the feed on any failure, instead of letting the process
+# die. Everything ELSE in this file (engine, threads,
+# watchdog, square-off monitor, telegram command center) was
+# already set up ONCE above and keeps running regardless --
+# only the feed connection itself needs to retry, so this
+# loop deliberately does NOT re-run any of that setup.
+#
+# Stops retrying after market hours (past 16:00 IST) so it
+# doesn't spin forever overnight hammering a dead connection
+# -- a fresh trading day needs a fresh process start anyway.
+# --------------------------------------------------
 
-print("✅ MarketFeed object created")
-print("Starting persistent connection (feed.run())...")
+RECONNECT_BACKOFF_SECONDS = 15
+reconnect_count = 0
 
-try:
-    # feed.run() is a BLOCKING call that keeps a single continuous
-    # event loop alive for the whole session -- including automatic
-    # reconnect handling inside the SDK itself -- so the keepalive
-    # ping/pong exchange is never interrupted by idle gaps the way
-    # the previous get_data()-in-a-loop pattern was.
-    feed.run()
+while True:
 
-except KeyboardInterrupt:
-    event_logger.system(
-        event="ENGINE_STOPPED",
-        message="Stopped by KeyboardInterrupt"
+    current_time = datetime.now().strftime("%H:%M")
+    if current_time >= "16:00":
+        print(
+            "[RECONNECT] Past 16:00 IST -- market day is over. "
+            "Not reconnecting further; process will exit."
+        )
+        break
+
+    feed = MarketFeed(
+        context,
+        instruments,
+        "v2",
+        on_connect=on_connect,
+        on_message=on_message,
+        on_error=on_error
     )
-    print("\nStopping ORB Auto Trader...")
-    feed.close_connection()
 
-except Exception as e:
-    event_logger.error(
-        event="ENGINE_EXCEPTION",
-        message=str(e)
-    )
-    logger.log(e)
-
-    print("\n========== FULL TRACEBACK ==========")
-    traceback.print_exc()
-    print("====================================")
+    print("✅ MarketFeed object created")
+    print("Starting persistent connection (feed.run())...")
 
     try:
-        engine.telegram.send(
-            "🔴 Dhan Connection Lost (fatal)\n"
-            f"{str(e)[:200]}"
+        # feed.run() is a BLOCKING call that keeps a single continuous
+        # event loop alive for the whole session -- including automatic
+        # reconnect handling inside the SDK itself -- so the keepalive
+        # ping/pong exchange is never interrupted by idle gaps the way
+        # the previous get_data()-in-a-loop pattern was.
+        feed.run()
+
+        # A clean return (no exception) from a BLOCKING call is itself
+        # unexpected during market hours -- treat it the same as a
+        # dropped connection and reconnect rather than letting the
+        # process exit silently.
+        print(
+            "[RECONNECT] feed.run() returned without an exception "
+            "-- reconnecting..."
         )
-    except Exception:
-        pass
+
+    except KeyboardInterrupt:
+        event_logger.system(
+            event="ENGINE_STOPPED",
+            message="Stopped by KeyboardInterrupt"
+        )
+        print("\nStopping ORB Auto Trader...")
+        try:
+            feed.close_connection()
+        except Exception:
+            pass
+        break
+
+    except Exception as e:
+        reconnect_count += 1
+
+        event_logger.error(
+            event="ENGINE_EXCEPTION",
+            message=str(e)
+        )
+        logger.log(e)
+
+        print("\n========== FULL TRACEBACK ==========")
+        traceback.print_exc()
+        print("====================================")
+
+        try:
+            engine.telegram.send(
+                f"🔴 Dhan connection lost (reconnect attempt "
+                f"#{reconnect_count})\n{str(e)[:200]}\n\n"
+                f"Auto-reconnecting in "
+                f"{RECONNECT_BACKOFF_SECONDS}s -- open positions "
+                f"are NOT protected (no stop/target/square-off "
+                f"checks run) until the connection is back."
+            )
+        except Exception:
+            pass
+
+    time.sleep(RECONNECT_BACKOFF_SECONDS)

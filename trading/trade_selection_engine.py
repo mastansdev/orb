@@ -1,4 +1,9 @@
 from config import MIN_ORB_RANGE_PERCENT
+from config import (
+    CATALYST_GATE_ENABLED,
+    CATALYST_PROVIDERS,
+    CATALYST_MIN_SCORE,
+)
 from intelligence.evidence_builder import EvidenceBuilder
 from intelligence.evidence_validator import EvidenceValidator
 from intelligence.conviction_engine import ConvictionEngine
@@ -468,23 +473,27 @@ class TradeSelectionEngine:
         )
 
         # ---------------------------------
-        # CATALYST GATE (core ideology, 2026-07-21)
+        # CATALYST / MARKET-SCAN EVIDENCE (2026-07-21 rewrite)
         #
-        # "News arms the system; price confirmation pulls
-        # the trigger." An ORB breakout with NO live
-        # catalyst on the symbol is a naked breakout —
-        # blocked, no matter how pretty the chart is.
-        # The whole universe is still scanned, but only
-        # catalyst-armed symbols may trade.
-        # (EVENT entries carry their own catalyst by
-        # construction — the F&O watchlist entry.)
+        # ORIGINAL BEHAVIOUR (removed): a HARD BLOCK — any ORB
+        # breakout without a matched catalyst or market-scan
+        # rank was rejected outright, no matter how strong the
+        # structural breakout. Result: 100+ genuine breakouts
+        # on 07-21 captured ZERO trades. This contradicted the
+        # bot's own motto ("Evidence contributes; Conviction
+        # decides; Risk authorizes; Execution acts") by turning
+        # evidence into a hard requirement instead of a booster.
+        #
+        # NEW BEHAVIOUR: catalyst/scan status is additional
+        # EVIDENCE that boosts conviction — it no longer gates
+        # entry. A genuine ORB breakout is evaluated by the
+        # Brain regardless of catalyst status; CONVICTION_MIN_
+        # SCORE (already enforced downstream by Brain.evaluate)
+        # is the real filter, using ALL available evidence
+        # (sector strength, pattern history, relative strength,
+        # news, F&O catalysts, results, causal chains, sympathy
+        # — and now market-scan leader status too).
         # ---------------------------------
-        from config import (
-            CATALYST_GATE_ENABLED,
-            CATALYST_PROVIDERS,
-            CATALYST_MIN_SCORE,
-        )
-
         if CATALYST_GATE_ENABLED and entry_mode != "EVENT":
             catalysts = [
                 ev for ev in validated_evidence
@@ -495,46 +504,60 @@ class TradeSelectionEngine:
                 and ev.score >= CATALYST_MIN_SCORE
             ]
 
-            # Second arming path: ACTIVE MARKET SCAN.
-            # No matched news? The stock can still trade if
-            # it is one of today's true leaders — top N of
-            # the whole universe by % change on live ticks.
-            scan_rank = None
-            if not catalysts:
-                scan_rank = self._market_scan_rank(symbol)
-
-            if not catalysts and scan_rank is None:
-                self.skipped += 1
-                return self._build_decision(
-                    selected=False,
-                    score=0,
-                    reasons=[
-                        f"{symbol}: NOT ARMED — no live "
-                        f"catalyst "
-                        f"({'/'.join(CATALYST_PROVIDERS)} "
-                        f"≥ {CATALYST_MIN_SCORE}) and not in "
-                        f"today's market-scan leaders. "
-                        f"Naked breakout blocked."
-                    ],
-                    brain_decision=None
-                )
+            # Second arming signal: ACTIVE MARKET SCAN. If the
+            # stock is one of today's true leaders (top N of
+            # the whole universe by % change on live ticks),
+            # that is itself evidence worth feeding to
+            # conviction — the tape is the evidence, even with
+            # no matched news story yet.
+            scan_rank = self._market_scan_rank(symbol)
 
             if catalysts:
                 print(
-                    f"[CATALYST GATE] {symbol} armed by: "
+                    f"[CATALYST] {symbol} boosted by: "
                     + "; ".join(
                         f"{ev.provider}({ev.score:.0f})"
                         for ev in catalysts[:3]
                     )
                 )
-            else:
+
+            if scan_rank is not None:
                 from intelligence.price_engine import (
                     price_engine as _pe,
                 )
+                from intelligence.evidence import Evidence
+
+                scan_score = max(30, 70 - (scan_rank - 1) * 2)
+                change = _pe.get_change(symbol)
+                validated_evidence.append(
+                    Evidence(
+                        provider="MARKET_SCAN",
+                        symbol=symbol,
+                        recommendation="BUY",
+                        score=scan_score,
+                        confidence=60,
+                        reason=(
+                            f"#{scan_rank} strongest in market "
+                            f"today ({change:+.2f}% vs prev "
+                            f"close) — active leader"
+                        ),
+                        facts={
+                            "scan_rank": scan_rank,
+                            "change_pct": change,
+                        },
+                    )
+                )
                 print(
-                    f"[MARKET SCAN] {symbol} armed: "
-                    f"#{scan_rank} strongest in market "
-                    f"({_pe.get_change(symbol):+.2f}%)"
+                    f"[MARKET SCAN] {symbol}: #{scan_rank} "
+                    f"strongest in market ({change:+.2f}%) — "
+                    f"added as evidence"
+                )
+
+            if not catalysts and scan_rank is None:
+                print(
+                    f"[{symbol}] no catalyst/scan evidence — "
+                    f"still evaluated on structural evidence "
+                    f"alone (sector/pattern/RS); Brain decides."
                 )
 
         conviction = self.conviction_engine.evaluate(validated_evidence)
