@@ -483,11 +483,29 @@ class NseResultsCalendarCollector(ResultsCalendarCollector):
                 # PURPOSE FILTER — NSE-specific, see class
                 # docstring. Skip anything not clearly a
                 # results-related board meeting.
-                purpose = str(
-                    row.get("bm_purpose", "")
+                #
+                # Fix (2026-07-21, after seeing REAL live rows
+                # via tools/nse_calendar_probe.py): NSE files
+                # each board meeting as MULTIPLE rows -- one
+                # generically tagged bm_purpose="Board Meeting
+                # Intimation", and often a second more specific
+                # one tagged bm_purpose="Financial Results".
+                # Checking bm_purpose alone missed any company
+                # whose only row happened to be the generic
+                # variant, even though its bm_desc explicitly
+                # says "...consider and approve the Unaudited
+                # Financial results...". Now checks both fields
+                # combined -- still keyword-gated (a genuinely
+                # unrelated board meeting, e.g. buyback-only,
+                # still gets skipped), just no longer blind to
+                # which of NSE's two row variants carried the
+                # word.
+                purpose_text = (
+                    str(row.get("bm_purpose", "")) + " "
+                    + str(row.get("bm_desc", ""))
                 ).lower()
                 if not any(
-                    kw in purpose
+                    kw in purpose_text
                     for kw in self.RESULTS_PURPOSE_KEYWORDS
                 ):
                     skipped_purpose += 1
