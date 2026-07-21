@@ -175,9 +175,22 @@ SECTOR_SENSITIVITY = {
 
     "CONSUMER DURABLES": {
         "commodities": {"copper": "cost", "aluminium": "cost", "steel": "cost", "crude oil": "cost"},
-        "currencies": {"usd/inr": "importer", "yuan": "importer"},
+        # Fix (2026-07-21): the yuan tag here was removed after
+        # user pushback -- it was a generic "often sourced from
+        # China" assumption, not a confirmed per-stock fact (the
+        # master database has no country-specific import data
+        # for these names, just IMPORT DEPENDENT/blank). Copper
+        # is the real, grounded driver for this sector (wiring/
+        # cables/motors) and stays untouched.
+        "currencies": {"usd/inr": "importer"},
         "government": "import duty on components, PLI scheme",
-        "notes": "Component imports (often from China) are cost-sensitive to rupee/yuan.",
+        "notes": (
+            "Copper is the primary real input cost (wiring, "
+            "cables, motors). Component/raw-material imports "
+            "add rupee-cost sensitivity generally, but no "
+            "specific sourcing-currency assumption beyond that "
+            "is made here."
+        ),
     },
 
     "CONSUMER DISCRETIONARY": {
@@ -221,14 +234,21 @@ SECTOR_SENSITIVITY = {
 
     "CHEMICALS": {
         "commodities": {"crude oil": "cost", "natural gas": "cost"},
-        "currencies": {"usd/inr": "exporter", "yuan": "importer"},
+        # Fix (2026-07-21): removed the yuan tag after user
+        # pushback -- it assumed Chinese sourcing/competition
+        # for the whole sector, which isn't backed by a per-
+        # stock fact in the master database (Asian Paints, e.g.,
+        # is just tagged IMPORT DEPENDENT with no country
+        # attached -- crude oil/feedstock cost is the real,
+        # grounded driver, not a China-specific currency guess).
+        "currencies": {"usd/inr": "exporter"},
         "government": "anti-dumping duty (esp. vs China), environmental clearance",
         "notes": (
-            "Crude/gas are feedstock (cost side). Many specialty "
-            "chemical names are also export-revenue (dollar "
-            "tailwind) while competing against Chinese imports "
-            "(yuan-linked headwind) -- both currency exposures "
-            "can be live at once for the same stock."
+            "Crude/gas are feedstock (cost side) -- this is the "
+            "concrete driver. Many specialty chemical names are "
+            "also export-revenue (dollar tailwind); a generic "
+            "China/yuan competitive-import assumption was removed "
+            "since it wasn't backed by per-stock data."
         ),
     },
 

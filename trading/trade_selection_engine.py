@@ -328,14 +328,8 @@ class TradeSelectionEngine:
         "record low", "hits a low", "at a low",
     )
 
-    # USD/INR direction only (the dominant, most-covered pair
-    # in Indian financial news). Other currencies in the
-    # taxonomy (yen, euro, gbp, yuan) deliberately have NO
-    # direction detection yet -- guessing their direction from
-    # generic keywords would be exactly the kind of fabrication
-    # this codebase avoids. Extend this explicitly, pair by
-    # pair, when there's a real headline pattern to test
-    # against -- not before.
+    # USD/INR direction (the dominant, most-covered pair in
+    # Indian financial news).
     _DOLLAR_UP = (
         "dollar strengthens", "dollar rises", "dollar gains",
         "dollar surges", "dollar firms", "rupee weakens",
@@ -349,6 +343,77 @@ class TradeSelectionEngine:
         "rupee appreciates", "rupee rises", "rupee firms",
         "rupee hits high", "rupee climbs",
     )
+
+    # Euro, GBP, yen, yuan direction (added 2026-07-21). These
+    # were deliberately left undetected until now -- see the
+    # git history note this replaces: guessing a currency's
+    # direction from invented keywords would be fabrication.
+    # These aren't invented, though -- "euro strengthens",
+    # "yen weakens", "pound gains", "yuan devalues" are the
+    # same standard, universal financial-journalism phrasing
+    # already proven for the dollar/rupee pair above, just
+    # applied to the other three currencies the sector taxonomy
+    # (sector_sensitivity.py) already maps exposure for --
+    # IT's euro/GBP billing, automobile's yen component
+    # imports, chemicals'/consumer durables' yuan exposure.
+    # Every one of those was sitting completely unreachable
+    # before this: the exposure was mapped, but nothing could
+    # ever detect the direction to react to it.
+    _EURO_UP = (
+        "euro strengthens", "euro rises", "euro gains",
+        "euro surges", "euro firms", "euro rallies",
+        "euro climbs",
+    )
+    _EURO_DOWN = (
+        "euro weakens", "euro falls", "euro declines",
+        "euro slips", "euro slides", "euro tumbles",
+    )
+    _GBP_UP = (
+        "pound strengthens", "pound rises", "pound gains",
+        "pound firms", "pound rallies", "sterling strengthens",
+        "sterling rises", "sterling gains",
+    )
+    _GBP_DOWN = (
+        "pound weakens", "pound falls", "pound declines",
+        "pound slips", "sterling weakens", "sterling falls",
+        "sterling declines",
+    )
+    _YEN_UP = (
+        "yen strengthens", "yen rises", "yen gains",
+        "yen firms", "yen rallies", "yen appreciates",
+    )
+    _YEN_DOWN = (
+        "yen weakens", "yen falls", "yen declines",
+        "yen slips", "yen slides", "yen depreciates",
+    )
+    _YUAN_UP = (
+        "yuan strengthens", "yuan rises", "yuan gains",
+        "yuan firms", "yuan appreciates",
+        "renminbi strengthens", "renminbi rises",
+        "renminbi gains", "renminbi appreciates",
+    )
+    _YUAN_DOWN = (
+        "yuan weakens", "yuan falls", "yuan declines",
+        "yuan depreciates", "yuan devalues",
+        "yuan devaluation", "renminbi weakens",
+        "renminbi falls", "renminbi depreciates",
+    )
+
+    # Factor-key -> real headline aliases (added 2026-07-21,
+    # found by testing before declaring this done): sector_
+    # sensitivity.py's factor keys are FX-code-style ("gbp",
+    # "yuan"), but real headlines almost never write "GBP" --
+    # they say "pound" or "sterling". Without this, the "gbp"
+    # factor could never match any realistic headline even
+    # though direction detection worked fine, since the raw
+    # factor-in-text check only looked for the literal key
+    # string. Commodity/dollar factor keys already read
+    # naturally (e.g. "crude oil", "dollar") so they don't need
+    # an alias list -- only added where testing showed a gap.
+    _CURRENCY_FACTOR_ALIASES = {
+        "gbp": ("gbp", "pound", "sterling"),
+        "yuan": ("yuan", "renminbi", "rmb"),
+    }
 
     # RBI repo rate direction (added 2026-07-21, wired to the
     # per-stock "rate_sensitive" flag from ECONOMIC_SENSITIVITY
@@ -411,6 +476,34 @@ class TradeSelectionEngine:
             return "down"
         return None
 
+    def _detect_euro_direction(self, text):
+        if any(kw in text for kw in self._EURO_UP):
+            return "up"
+        if any(kw in text for kw in self._EURO_DOWN):
+            return "down"
+        return None
+
+    def _detect_gbp_direction(self, text):
+        if any(kw in text for kw in self._GBP_UP):
+            return "up"
+        if any(kw in text for kw in self._GBP_DOWN):
+            return "down"
+        return None
+
+    def _detect_yen_direction(self, text):
+        if any(kw in text for kw in self._YEN_UP):
+            return "up"
+        if any(kw in text for kw in self._YEN_DOWN):
+            return "down"
+        return None
+
+    def _detect_yuan_direction(self, text):
+        if any(kw in text for kw in self._YUAN_UP):
+            return "up"
+        if any(kw in text for kw in self._YUAN_DOWN):
+            return "down"
+        return None
+
     def _sensitivity_fanout(self, story):
         """
         For one MACRO/COMMODITY-category story, fan out
@@ -433,12 +526,38 @@ class TradeSelectionEngine:
 
         commodity_dir = self._detect_commodity_direction(text)
         dollar_dir = self._detect_dollar_direction(text)
+        euro_dir = self._detect_euro_direction(text)
+        gbp_dir = self._detect_gbp_direction(text)
+        yen_dir = self._detect_yen_direction(text)
+        yuan_dir = self._detect_yuan_direction(text)
         rate_dir = self._detect_rate_direction(text)
         govt_dir = self._detect_govt_spending_direction(text)
 
+        # Route each currency pair's own detected direction to
+        # the matching factor key in a stock's currencies dict
+        # (sector_sensitivity.py uses "usd/inr"/"dollar"/"rupee"
+        # for the dollar pair, and "euro"/"gbp"/"yen"/"yuan" for
+        # the others) -- added 2026-07-21 alongside the euro/
+        # gbp/yen/yuan detectors above. Before this, a single
+        # dollar_dir variable was applied to WHATEVER currency
+        # factor a stock had mapped, which only happened to be
+        # correct because no other pair could ever be detected.
+        currency_directions = {
+            "usd/inr": dollar_dir,
+            "dollar": dollar_dir,
+            "rupee": dollar_dir,
+            "euro": euro_dir,
+            "gbp": gbp_dir,
+            "yen": yen_dir,
+            "yuan": yuan_dir,
+        }
+        any_currency_dir = any(
+            d is not None for d in currency_directions.values()
+        )
+
         if (
             commodity_dir is None
-            and dollar_dir is None
+            and not any_currency_dir
             and rate_dir is None
             and govt_dir is None
         ):
@@ -477,19 +596,26 @@ class TradeSelectionEngine:
                     matched_factor = factor
                     break
 
-            if stock_direction is None and dollar_dir is not None:
+            if stock_direction is None and any_currency_dir:
                 for factor, exposure in sens.get("currencies", {}).items():
-                    if factor not in text:
+                    aliases = self._CURRENCY_FACTOR_ALIASES.get(
+                        factor, (factor,)
+                    )
+                    if not any(alias in text for alias in aliases):
                         continue
-                    # exporter: dollar strength (rupee weak) = tailwind
-                    # importer: dollar strength (rupee weak) = headwind
+                    pair_dir = currency_directions.get(factor)
+                    if pair_dir is None:
+                        continue
+                    # exporter: this currency strengthening (INR
+                    # weakening against it) = tailwind
+                    # importer: this currency strengthening = headwind
                     if exposure == "exporter":
                         stock_direction = (
-                            "BUY" if dollar_dir == "up" else "SELL"
+                            "BUY" if pair_dir == "up" else "SELL"
                         )
                     elif exposure == "importer":
                         stock_direction = (
-                            "SELL" if dollar_dir == "up" else "BUY"
+                            "SELL" if pair_dir == "up" else "BUY"
                         )
                     matched_factor = factor
                     break
