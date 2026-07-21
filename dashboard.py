@@ -926,8 +926,23 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
 
+# Fix (2026-07-21): switching to ThreadingHTTPServer (for the
+# interactive Sell/Check/Schedule POST endpoints) spawns a new
+# thread per request. Plain ThreadingHTTPServer's worker
+# threads are NON-daemon by default -- if one is alive (or the
+# browser's 5-second auto-refresh spawns a new one) at the
+# instant Ctrl+C is pressed, the process can sit there refusing
+# to actually exit even though serve_forever() returned, which
+# is exactly what was seen: had to close the whole terminal or
+# kill the process manually 3-4 times. daemon_threads = True
+# makes every worker thread die with the main thread instead of
+# blocking process exit.
+class DashboardServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+
 def main():
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    server = DashboardServer(("127.0.0.1", PORT), Handler)
     print("=" * 55)
     print("  ORB AUTO TRADER DASHBOARD")
     print("=" * 55)
@@ -938,7 +953,16 @@ def main():
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nDashboard stopped.")
+        print("\nStopping dashboard...")
+    finally:
+        server.server_close()
+        print("Dashboard stopped.")
+        # Belt-and-braces: guarantees the terminal actually
+        # returns control even if some stray thread/socket
+        # edge case would otherwise linger. Safe here since this
+        # is a standalone, read-mostly local utility, not a
+        # service with state to flush on shutdown.
+        os._exit(0)
 
 
 if __name__ == "__main__":
