@@ -227,6 +227,53 @@ class TradeSelectionEngine:
         "rupee hits high", "rupee climbs",
     )
 
+    # RBI repo rate direction (added 2026-07-21, wired to the
+    # per-stock "rate_sensitive" flag from ECONOMIC_SENSITIVITY
+    # = INTEREST RATE SENSITIVE / HOUSING). "MACRO" category
+    # already covers "repo rate"/"rbi"/"interest rate" keywords
+    # (news/news_taxonomy.py) -- this only adds direction on
+    # top of a story already known to be about rates.
+    _RATE_CUT = (
+        "repo rate cut", "rbi cuts", "cuts repo rate",
+        "cuts rates", "rate cut", "lowers repo rate",
+        "eases rate", "rbi eases", "slashes repo rate",
+        "reduces repo rate",
+    )
+    _RATE_HIKE = (
+        "repo rate hike", "rbi hikes", "hikes repo rate",
+        "hikes rates", "rate hike", "raises repo rate",
+        "rbi raises", "tightens rate", "increases repo rate",
+    )
+
+    # Government capex/budget direction (wired to the per-stock
+    # "govt_spending_sensitive" flag = GOVERNMENT SPENDING).
+    _GOVT_SPENDING_UP = (
+        "capex allocation increased", "boosts capex",
+        "raises capex", "infrastructure push",
+        "increases infra spending", "record capex allocation",
+        "hikes capex", "budget allocation increased",
+        "allocates more", "capex outlay raised",
+    )
+    _GOVT_SPENDING_DOWN = (
+        "cuts capex", "reduces budget allocation",
+        "slashes spending", "budget cut", "spending cut",
+        "reduces capex", "lowers capex allocation",
+    )
+
+    def _detect_rate_direction(self, text):
+        if any(kw in text for kw in self._RATE_CUT):
+            return "cut"
+        if any(kw in text for kw in self._RATE_HIKE):
+            return "hike"
+        return None
+
+    def _detect_govt_spending_direction(self, text):
+        if any(kw in text for kw in self._GOVT_SPENDING_UP):
+            return "up"
+        if any(kw in text for kw in self._GOVT_SPENDING_DOWN):
+            return "down"
+        return None
+
     def _detect_commodity_direction(self, text):
         if any(kw in text for kw in self._COMMODITY_UP):
             return "up"
@@ -263,8 +310,15 @@ class TradeSelectionEngine:
 
         commodity_dir = self._detect_commodity_direction(text)
         dollar_dir = self._detect_dollar_direction(text)
+        rate_dir = self._detect_rate_direction(text)
+        govt_dir = self._detect_govt_spending_direction(text)
 
-        if commodity_dir is None and dollar_dir is None:
+        if (
+            commodity_dir is None
+            and dollar_dir is None
+            and rate_dir is None
+            and govt_dir is None
+        ):
             return []
 
         headline = (getattr(story, "name", "") or "")[:150]
@@ -316,6 +370,29 @@ class TradeSelectionEngine:
                         )
                     matched_factor = factor
                     break
+
+            # Interest-rate-sensitive stocks (per-stock flag from
+            # ECONOMIC_SENSITIVITY = INTEREST RATE SENSITIVE /
+            # HOUSING) -- a repo rate cut lowers borrowing cost
+            # and boosts loan/housing demand (tailwind); a hike
+            # does the opposite.
+            if stock_direction is None and rate_dir is not None:
+                if sens.get("rate_sensitive"):
+                    stock_direction = (
+                        "BUY" if rate_dir == "cut" else "SELL"
+                    )
+                    matched_factor = "RBI repo rate"
+
+            # Government-capex-sensitive stocks (per-stock flag
+            # from ECONOMIC_SENSITIVITY = GOVERNMENT SPENDING) --
+            # infra/capital-goods/defence names whose order book
+            # tracks budget/capex announcements directly.
+            if stock_direction is None and govt_dir is not None:
+                if sens.get("govt_spending_sensitive"):
+                    stock_direction = (
+                        "BUY" if govt_dir == "up" else "SELL"
+                    )
+                    matched_factor = "government capex/budget"
 
             if stock_direction is None:
                 continue

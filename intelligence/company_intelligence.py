@@ -125,6 +125,42 @@ class CompanyIntelligence:
                     symbol
                 )
 
+                # Per-stock sensitivity tags (added 2026-07-21).
+                # These two columns exist in the master database
+                # but were never read anywhere before -- confirmed
+                # real coverage: ECONOMIC_SENSITIVITY populated for
+                # 604/750 rows (81%), COMMODITY_EXPOSURE for 135/750
+                # (18%, i.e. only the stocks with a genuine direct
+                # commodity link are tagged -- most aren't, correctly).
+                # Both are pipe-separated free text with a small,
+                # closed vocabulary (confirmed by inspecting all
+                # distinct values, not guessed):
+                #   ECONOMIC_SENSITIVITY: CONSUMER DRIVEN,
+                #     EXPORT ORIENTED, GOVERNMENT SPENDING,
+                #     IMPORT DEPENDENT, INTEREST RATE SENSITIVE,
+                #     HOUSING (combos joined with "|")
+                #   COMMODITY_EXPOSURE: specific commodity names
+                #     (ALUMINIUM, COPPER, CRUDE OIL, COAL, COTTON,
+                #     GOLD, LIMESTONE, NATURAL GAS, PHOSPHATES,
+                #     STEEL, SUGAR, UREA, ZINC, LEAD, SILVER)
+                commodity_exposure = [
+                    c.strip().upper()
+                    for c in re.split(
+                        r"[|,]",
+                        str(row.get("COMMODITY_EXPOSURE", ""))
+                    )
+                    if c.strip()
+                ]
+
+                economic_sensitivity = [
+                    e.strip().upper()
+                    for e in re.split(
+                        r"[|,]",
+                        str(row.get("ECONOMIC_SENSITIVITY", ""))
+                    )
+                    if e.strip()
+                ]
+
                 self.profiles[symbol].update({
                     "company_name": row.get("COMPANY NAME", ""),
                     "core_business": row.get("CORE BUSINESS", ""),
@@ -134,6 +170,10 @@ class CompanyIntelligence:
                     "keywords": keywords,
                     "fno": row.get("FNO", ""),
                     "lot_size": row.get("LOT SIZE", ""),
+                    "business_type": row.get("BUSINESS_TYPE", ""),
+                    "ownership": row.get("OWNERSHIP", ""),
+                    "commodity_exposure": commodity_exposure,
+                    "economic_sensitivity": economic_sensitivity,
                 })
 
             print(
@@ -158,6 +198,10 @@ class CompanyIntelligence:
             "keywords": [],
             "fno": "",
             "lot_size": "",
+            "business_type": "",
+            "ownership": "",
+            "commodity_exposure": [],
+            "economic_sensitivity": [],
 
             # Future enrichment containers
             "products": [],
@@ -445,22 +489,160 @@ class CompanyIntelligence:
         ][:limit]
 
     # --------------------------------------------------
-    # PUBLIC : Sector Sensitivity  (added 2026-07-21)
+    # PUBLIC : Per-Stock Sensitivity
+    # (sector-level added 2026-07-21, per-stock layer
+    # added same day after the sector-only version was
+    # found too coarse)
     # --------------------------------------------------
     #
-    # Curated commodity/currency/government sensitivity per
-    # sector -- see intelligence/sector_sensitivity.py for
-    # the full taxonomy and why this is domain knowledge,
-    # not a live data feed pretending to be one.
+    # Commodity/currency/government/rate sensitivity, per
+    # STOCK -- built by layering the master database's own
+    # per-stock tags (COMMODITY_EXPOSURE, ECONOMIC_SENSITIVITY,
+    # BUSINESS_TYPE) on top of the curated sector/industry
+    # taxonomy in intelligence/sector_sensitivity.py. See the
+    # full reasoning in the method docstring below.
 
     def get_sensitivity(self, symbol):
-        from intelligence.sector_sensitivity import get_sensitivity
+        """
+        Per-stock sensitivity, built by layering the master
+        database's own per-stock tags (COMMODITY_EXPOSURE,
+        ECONOMIC_SENSITIVITY, BUSINESS_TYPE) on top of the
+        sector/industry taxonomy (sector_sensitivity.py).
+
+        Why layered rather than sector-only (2026-07-21): the
+        sector taxonomy is a reasonable generalization but is
+        genuinely wrong at the edges -- e.g. every CAPITAL GOODS
+        stock was treated as steel+copper+aluminium cost-exposed,
+        even ones with no real exposure to two of the three. The
+        master database's COMMODITY_EXPOSURE column tags each
+        stock with ONLY the commodities it's actually linked to
+        (135/750 rows populated -- most stocks correctly have
+        none), so where it's populated it REPLACES the sector
+        commodity list with the stock's real, narrower one rather
+        than adding to it. Direction (cost vs revenue) still
+        comes from the sector/industry entry when that commodity
+        is already known there (that reasoning doesn't change
+        per-stock); for a commodity tagged on the stock but not
+        in the sector dict, direction is inferred from
+        BUSINESS_TYPE: MINING (a producer) = revenue, anything
+        else = cost (a purchaser/consumer of the input) -- the
+        same producer/consumer logic already used to write the
+        sector table, just applied per stock instead of assumed
+        uniformly across the whole sector.
+
+        ECONOMIC_SENSITIVITY (81% populated) similarly overrides
+        the sector-level USD/INR guess with the stock's own
+        EXPORT ORIENTED / IMPORT DEPENDENT tag when present, and
+        adds two trigger flags the sector taxonomy never had:
+        rate_sensitive (INTEREST RATE SENSITIVE or HOUSING) and
+        govt_spending_sensitive (GOVERNMENT SPENDING) -- both
+        consumed by TradeSelectionEngine._sensitivity_fanout()
+        for RBI-rate and budget/capex news. CONSUMER DRIVEN is
+        deliberately NOT wired to a news trigger yet -- there's
+        no reliable, unambiguous headline pattern for "consumer
+        demand rose/fell" the way there is for a rate cut/hike,
+        and guessing one would be exactly the kind of fabrication
+        this file avoids elsewhere.
+        """
+        from intelligence.sector_sensitivity import (
+            get_sensitivity as _sector_sensitivity,
+        )
 
         profile = self.get_profile(symbol)
-        return get_sensitivity(
+        base = _sector_sensitivity(
             profile.get("sector", ""),
             profile.get("industry", ""),
         )
+
+        commodity_exposure = profile.get("commodity_exposure") or []
+        economic_sensitivity = profile.get("economic_sensitivity") or []
+        business_type = str(profile.get("business_type", "")).strip().upper()
+
+        result = {
+            "commodities": dict(base.get("commodities", {})),
+            "currencies": dict(base.get("currencies", {})),
+            "government": base.get("government", ""),
+            "notes": base.get("notes", ""),
+            "rate_sensitive": False,
+            "govt_spending_sensitive": False,
+        }
+
+        # --------------------------------------------------
+        # Per-stock commodity override (narrows to only the
+        # commodities THIS stock is actually tagged with).
+        # --------------------------------------------------
+        if commodity_exposure:
+            narrowed = {}
+            for tag in commodity_exposure:
+                key = tag.strip().lower()
+                if not key:
+                    continue
+
+                # MINING business type means THIS stock is a
+                # producer of the commodity it's tagged with --
+                # that always means revenue-side, even if the
+                # sector table's entry for the same commodity
+                # name was written with a different kind of
+                # company in mind (e.g. METALS & MINING's
+                # "coal": "cost" was reasoned for steel/aluminium
+                # smelters buying coal as furnace fuel -- wrong
+                # for a coal producer like Coal India, which is
+                # also tagged coal exposure but SELLS it).
+                if business_type == "MINING":
+                    narrowed[key] = "revenue"
+                    continue
+
+                # Otherwise prefer the sector/industry-reasoned
+                # direction for this exact commodity if known.
+                if key in result["commodities"]:
+                    narrowed[key] = result["commodities"][key]
+                    continue
+
+                # Not in the sector table and not a producer --
+                # default to cost (a purchaser/consumer of the
+                # input), the more common case for a company
+                # explicitly tagged with a commodity exposure.
+                narrowed[key] = "cost"
+
+            result["commodities"] = narrowed
+
+        # --------------------------------------------------
+        # Per-stock currency override (EXPORT ORIENTED /
+        # IMPORT DEPENDENT are stock-specific facts, more
+        # reliable than a sector-wide guess). Overwrites EVERY
+        # currency key the sector table had (usd/inr, dollar,
+        # euro, gbp, yuan, yen are all just alternate headline
+        # phrasings of the same USD/INR relationship in this
+        # taxonomy) so a stock's own tag can't be contradicted
+        # by a stale sector-level entry for a different phrasing
+        # of the same pair -- e.g. without this, a stock overridden
+        # to "importer" via usd/inr could still carry the sector's
+        # old "dollar": "exporter" entry untouched, and a headline
+        # saying "dollar strengthens" would silently give the
+        # wrong-direction signal.
+        # --------------------------------------------------
+        if "EXPORT ORIENTED" in economic_sensitivity:
+            result["currencies"] = {
+                k: "exporter" for k in result["currencies"]
+            } or {"usd/inr": "exporter"}
+        elif "IMPORT DEPENDENT" in economic_sensitivity:
+            result["currencies"] = {
+                k: "importer" for k in result["currencies"]
+            } or {"usd/inr": "importer"}
+
+        # --------------------------------------------------
+        # New per-stock trigger flags (no sector equivalent).
+        # --------------------------------------------------
+        if (
+            "INTEREST RATE SENSITIVE" in economic_sensitivity
+            or "HOUSING" in economic_sensitivity
+        ):
+            result["rate_sensitive"] = True
+
+        if "GOVERNMENT SPENDING" in economic_sensitivity:
+            result["govt_spending_sensitive"] = True
+
+        return result
 
     # --------------------------------------------------
 
@@ -504,6 +686,10 @@ class CompanyIntelligence:
             sens_parts.append(
                 f"government: {sensitivity['government']}"
             )
+        if sensitivity.get("rate_sensitive"):
+            sens_parts.append("RBI rate moves")
+        if sensitivity.get("govt_spending_sensitive"):
+            sens_parts.append("govt capex/budget")
         if sens_parts:
             lines.append(
                 "Sensitive to : " + " | ".join(sens_parts)
