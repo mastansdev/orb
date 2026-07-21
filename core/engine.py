@@ -431,6 +431,15 @@ class Engine:
         from intelligence.news_watchlist import NewsWatchlist
         self.news_watchlist = NewsWatchlist()
 
+        # Pre-Market Snapshot (2026-07-21) : real pre-open
+        # discovered price + volume, captured from the live
+        # feed's 09:00-09:15 window -- see
+        # intelligence/premarket_snapshot.py.
+        from intelligence.premarket_snapshot import (
+            PreMarketSnapshot,
+        )
+        self.premarket_snapshot = PreMarketSnapshot()
+
         # Dashboard Bridge (2026-07-21) : file-based command/
         # state channel to the separate dashboard.py process --
         # powers the interactive Sell / Check Now / Schedule
@@ -657,7 +666,12 @@ class Engine:
         self.monitor.set_status("RUNNING")
         self.monitor.set_connection("CONNECTED")
 
-    def process_tick(self, security_id, symbol, ltp, ltt):
+    def process_tick(self, security_id, symbol, ltp, ltt, volume=0):
+        # volume (2026-07-21): defaulted to 0 -- market_replay.py's
+        # CSV replay and tests/test_engine.py don't pass it, and
+        # shouldn't have to. Real volume only arrives once
+        # market_data.py subscribes in Quote mode (see that file
+        # and core/master_loader.py for the actual feed switch).
         try:
             self.monitor.increment_processed_ticks()
 
@@ -686,7 +700,26 @@ class Engine:
             # ---------------------------------
             # Tick Cache Update
             # ---------------------------------
-            self.tick_cache.update(security_id, ltp, ltt)
+            self.tick_cache.update(security_id, ltp, ltt, volume=volume)
+
+            # ---------------------------------
+            # Pre-Market Snapshot (2026-07-21)
+            # ---------------------------------
+            # Captures each symbol's genuine pre-open discovered
+            # price/volume once, the first time a fresh (today's)
+            # tick arrives before the 09:15 open -- see
+            # intelligence/premarket_snapshot.py for why this
+            # window and why "fresh" needs checking at all
+            # (empirically confirmed from today's diagnostic:
+            # packets during 08:59-09:07 carry yesterday's stale
+            # LTT/values, not today's pre-open discovery).
+            if self.premarket_snapshot is not None:
+                try:
+                    self.premarket_snapshot.on_tick(
+                        symbol, ltp, ltt, volume
+                    )
+                except Exception as e:
+                    print(f"[PREMARKET] {e}")
 
             # ---------------------------------
             # Price Engine Update
@@ -2491,7 +2524,39 @@ class Engine:
         except Exception:
             pass
 
-        # 5. Learning depth
+        # 5. Pre-market gap/volume snapshot (2026-07-21) --
+        # real pre-open discovered price + volume, captured
+        # from the live feed's 09:00-09:15 window. Empty before
+        # 09:00 and after the feed has genuinely captured
+        # something -- see intelligence/premarket_snapshot.py.
+        try:
+            pm = self.premarket_snapshot
+            if pm is not None and pm.snapshots:
+                ranked = pm.ranked_by_gap(
+                    price_engine=price_engine, limit=10
+                )
+                if ranked:
+                    lines.append("")
+                    lines.append(
+                        f"📈 PRE-MARKET GAPPERS "
+                        f"({len(pm.snapshots)} captured) — "
+                        f"biggest move vs previous close:"
+                    )
+                    for r in ranked:
+                        gap_str = (
+                            f"{r['gap_percent']:+.2f}%"
+                            if r["gap_percent"] is not None
+                            else "—"
+                        )
+                        lines.append(
+                            f"  {r['symbol']:<12} {gap_str:>8}  "
+                            f"₹{r['price']:.2f}  "
+                            f"vol {r['volume']:,}"
+                        )
+        except Exception as e:
+            print(f"[PREMARKET REPORT] {e}")
+
+        # 6. Learning depth
         try:
             counts = (
                 self.market_memory.repository

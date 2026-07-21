@@ -122,12 +122,26 @@ class MasterLoader:
         fno_count = df["is_fno_bool"].sum()
         total_stocks_count = len(self.security_to_symbol)
 
-        # Build Dhan MarketFeed subscription list
+        # Build Dhan MarketFeed subscription list.
+        #
+        # Fix (2026-07-21): was MarketFeed.Ticker for all 750
+        # stocks -- Ticker mode is LTP-only, so the live bot has
+        # NEVER had real-time volume data, at all, for anything.
+        # Confirmed via a live diagnostic run today
+        # (tests/Test_premarket_feed.py, see
+        # premarket_feed_test_20260721_085953.log): Quote mode
+        # carries volume/total_buy_quantity/total_sell_quantity
+        # plus OHLC, and is also what reveals the genuine
+        # pre-open discovered price (see
+        # intelligence/premarket_snapshot.py). Switched to Quote
+        # for the whole universe -- still one field per
+        # instrument tuple, same subscription mechanics, just a
+        # richer packet per tick.
         self.instruments = [
             (
                 MarketFeed.NSE,
                 security_id,
-                MarketFeed.Ticker
+                MarketFeed.Quote
             )
             for security_id in df["SECURITY ID"]
         ]

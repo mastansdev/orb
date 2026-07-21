@@ -256,7 +256,19 @@ def tick_worker():
             # ---------------------------------
             # Ignore everything except live ticks
             # ---------------------------------
-            if tick_type != "Ticker Data":
+            # Fix (2026-07-21): now that the feed subscribes in
+            # Quote mode (core/master_loader.py), packets arrive
+            # tagged "Quote Data" instead of "Ticker Data" --
+            # confirmed real packet shape from today's live
+            # diagnostic (premarket_feed_test_20260721_085953.log):
+            # {'type': 'Quote Data', 'security_id':..., 'LTP':...,
+            # 'LTT':..., 'volume':..., 'total_buy_quantity':...,
+            # 'total_sell_quantity':..., 'open'/'high'/'low'/
+            # 'close':...}. Same LTP/LTT keys as the old Ticker
+            # Data packets, plus volume -- accepting both types
+            # here rather than assuming every environment/reconnect
+            # is guaranteed to only ever send one or the other.
+            if tick_type not in ("Ticker Data", "Quote Data"):
                 continue
 
             security_id = str(tick["security_id"])
@@ -273,7 +285,8 @@ def tick_worker():
                 security_id=security_id,
                 symbol=symbol,
                 ltp=float(tick["LTP"]),
-                ltt=tick["LTT"]
+                ltt=tick["LTT"],
+                volume=int(tick.get("volume", 0) or 0),
             )
 
         except Exception:
