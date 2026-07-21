@@ -59,6 +59,12 @@ from config import (
 
 class RiskGovernor:
 
+    # Same threshold PortfolioRiskManager uses for its own
+    # (rarely-reached, gated at 25 trades) replacement logic --
+    # kept identical here so both gates agree on "how much
+    # better is better enough" to justify a swap.
+    MIN_REPLACEMENT_ADVANTAGE = 15
+
     def __init__(
         self,
         capital_manager,
@@ -231,6 +237,17 @@ class RiskGovernor:
             FAST_DROP_WINDOW_MINUTES,
         )
 
+        # Simplified risk stack (2026-07-21): both shock
+        # guards behind one master switch. Daily max loss
+        # + per-trade stops remain the only kill rules.
+        try:
+            from config import SHOCK_GUARDS_ENABLED
+        except ImportError:
+            SHOCK_GUARDS_ENABLED = True
+
+        if not SHOCK_GUARDS_ENABLED:
+            return
+
         if self.locked or not RISK_GOVERNOR_ENABLED:
             return
 
@@ -324,6 +341,39 @@ class RiskGovernor:
         )
 
     # --------------------------------------------------
+
+    def _weakest_trade(self, trades, exclude_sector_full=None):
+        """
+        Return (security_id, trade_dict) for the weakest
+        currently open trade by conviction, or (None, None)
+        if there are no trades to compare against.
+
+        exclude_sector_full: if the block reason is a sector
+        cap (not portfolio heat), only positions IN that
+        sector are eligible to be displaced -- swapping out
+        an unrelated sector's position wouldn't free up the
+        sector slot that's actually full.
+        """
+        if not trades:
+            return None, None
+
+        candidates = list(trades.items())
+        if exclude_sector_full:
+            candidates = [
+                (sid, t) for sid, t in candidates
+                if t.get("sector", "") == exclude_sector_full
+            ]
+
+        if not candidates:
+            return None, None
+
+        weakest_id, weakest_trade = min(
+            candidates,
+            key=lambda item: item[1].get("conviction", 0),
+        )
+        return weakest_id, weakest_trade
+
+    # --------------------------------------------------
     # PUBLIC : Entry Authorization
     # --------------------------------------------------
 
@@ -331,23 +381,42 @@ class RiskGovernor:
         self,
         trades,
         new_risk=0.0,
-        sector=""
+        sector="",
+        new_conviction=0.0,
     ):
         """
         Called BEFORE every new entry.
 
-        Returns (allowed: bool, reason: str)
+        Returns (allowed: bool, reason: str, replace_security_id: str|None)
+
+        Fix (2026-07-21): the heat cap and sector cap used to be
+        pure flat rejects with zero comparison to what's already
+        held -- confirmed live to be actively costing real
+        opportunities (GAIL at conviction 95.4, KARURVYSYA, both
+        blocked and expired unused while weaker positions sat
+        untouched). This is the real-time version of the
+        compare-and-swap logic; the 30s capital-allocation-cycle
+        version proved too slow/unreliable on its own (blocked by
+        its own 10-min minimum-hold window at the exact moments
+        these opportunities appeared).
+
+        When the heat cap or sector cap would otherwise reject a
+        candidate, compare it against the weakest currently open
+        position instead of just saying no. If the new candidate
+        clears MIN_REPLACEMENT_ADVANTAGE in conviction, the
+        weakest trade is marked for replacement (caller executes
+        the actual exit) and this candidate is allowed in.
         """
 
         if not RISK_GOVERNOR_ENABLED:
-            return True, "Risk Governor disabled"
+            return True, "Risk Governor disabled", None
 
         # ---------------------------------
         # 1. Kill switch already fired
         # ---------------------------------
         if self.locked:
             self.entries_blocked += 1
-            return False, f"LOCKED: {self.lock_reason}"
+            return False, f"LOCKED: {self.lock_reason}", None
 
         # ---------------------------------
         # 2. Daily loss lockout
@@ -360,7 +429,7 @@ class RiskGovernor:
                 f"(₹{day_pnl:.0f} ≤ -₹{self.daily_max_loss:.0f})"
             )
             self.entries_blocked += 1
-            return False, "Daily loss limit"
+            return False, "Daily loss limit", None
 
         # ---------------------------------
         # 3. Daily profit lock (soft: entries only)
@@ -375,46 +444,89 @@ class RiskGovernor:
                     f"Open positions continue to be managed."
                 )
             self.entries_blocked += 1
-            return False, "Daily profit target reached"
+            return False, "Daily profit target reached", None
 
         # ---------------------------------
         # 4. Consecutive loss pause
+        #    (0 = disabled — simplified stack 2026-07-21)
         # ---------------------------------
-        if self.consecutive_losses >= MAX_CONSECUTIVE_LOSSES:
+        if (
+            MAX_CONSECUTIVE_LOSSES > 0
+            and self.consecutive_losses >= MAX_CONSECUTIVE_LOSSES
+        ):
             self._lock(
                 f"{self.consecutive_losses} consecutive losses "
                 f"— regime likely hostile"
             )
             self.entries_blocked += 1
-            return False, "Consecutive loss pause"
+            return False, "Consecutive loss pause", None
 
         # ---------------------------------
-        # 5. Portfolio heat cap
+        # 5. Portfolio heat cap -- now compare-and-swap
         # ---------------------------------
         heat = self.portfolio_heat(trades)
 
         if heat + new_risk > MAX_PORTFOLIO_HEAT:
+            weakest_id, weakest_trade = self._weakest_trade(trades)
+
+            if weakest_trade is not None:
+                weakest_conviction = weakest_trade.get(
+                    "conviction", 0
+                )
+                advantage = new_conviction - weakest_conviction
+
+                if advantage >= self.MIN_REPLACEMENT_ADVANTAGE:
+                    return True, (
+                        f"REPLACE: heat cap full, but "
+                        f"{new_conviction:.0f} beats weakest "
+                        f"{weakest_trade.get('symbol', '?')} "
+                        f"({weakest_conviction:.0f}) by "
+                        f"{advantage:.0f} — swapping"
+                    ), weakest_id
+
             self.entries_blocked += 1
             return False, (
                 f"Portfolio heat cap "
                 f"(₹{heat:.0f} + ₹{new_risk:.0f} > "
-                f"₹{MAX_PORTFOLIO_HEAT})"
-            )
+                f"₹{MAX_PORTFOLIO_HEAT}) — no open position "
+                f"weak enough to justify a swap"
+            ), None
 
         # ---------------------------------
-        # 6. Sector concentration cap
+        # 6. Sector concentration cap -- now compare-and-swap
         # ---------------------------------
         if sector:
             count = self._sector_count(trades, sector)
 
             if count >= MAX_POSITIONS_PER_SECTOR:
+                weakest_id, weakest_trade = self._weakest_trade(
+                    trades, exclude_sector_full=sector
+                )
+
+                if weakest_trade is not None:
+                    weakest_conviction = weakest_trade.get(
+                        "conviction", 0
+                    )
+                    advantage = new_conviction - weakest_conviction
+
+                    if advantage >= self.MIN_REPLACEMENT_ADVANTAGE:
+                        return True, (
+                            f"REPLACE: sector cap full for "
+                            f"{sector}, but {new_conviction:.0f} "
+                            f"beats weakest same-sector "
+                            f"{weakest_trade.get('symbol', '?')} "
+                            f"({weakest_conviction:.0f}) by "
+                            f"{advantage:.0f} — swapping"
+                        ), weakest_id
+
                 self.entries_blocked += 1
                 return False, (
                     f"Sector cap: {count} open positions "
-                    f"in {sector}"
-                )
+                    f"in {sector} — no weaker same-sector "
+                    f"position to swap"
+                ), None
 
-        return True, "Risk authorized"
+        return True, "Risk authorized", None
 
     # --------------------------------------------------
     # PUBLIC : Trade Result Feedback

@@ -128,8 +128,15 @@ class ResultsWatchlist:
             entry["state"] = "ANNOUNCED"
             entry["since"] = datetime.now()
             entry["headline"] = event.get("headline", "")[:100]
+            # Fix (2026-07-21): remember the announcement's
+            # direction so a BAD result never becomes BUY
+            # evidence downstream.
+            entry["direction"] = str(
+                event.get("direction", "") or ""
+            ).upper()
             print(
-                f"[WATCHLIST] {symbol} RESULT ANNOUNCED → "
+                f"[WATCHLIST] {symbol} RESULT ANNOUNCED "
+                f"({entry['direction'] or 'NEUTRAL'}) → "
                 f"live catalyst"
             )
 
@@ -148,20 +155,48 @@ class ResultsWatchlist:
         if entry is None or entry["state"] != "ANNOUNCED":
             return []
 
+        # Fix (2026-07-21): direction-aware. Previously this
+        # was a hard-coded BUY for ANY announced result —
+        # a weak result armed the stock too. Now:
+        #   negative announcement → SELL evidence (blocks
+        #     the catalyst gate + drags conviction bearish)
+        #   positive → BUY
+        #   unknown/neutral → WAIT (does NOT arm by itself;
+        #     the keyword classifier's STRONG/WEAK_RESULTS
+        #     story evidence and the ORB price confirmation
+        #     decide — price is the final grader)
+        direction = entry.get("direction", "")
+
+        if direction in (
+            "WEAKENING", "CONTRADICTED", "NEGATIVE", "BEARISH"
+        ):
+            recommendation = "SELL"
+            reason_tag = "NEGATIVE result"
+        elif direction in (
+            "STRENGTHENING", "POSITIVE", "BULLISH"
+        ):
+            recommendation = "BUY"
+            reason_tag = "POSITIVE result"
+        else:
+            recommendation = "WAIT"
+            reason_tag = "result (direction unclear)"
+
         return [
             Evidence(
                 provider="RESULTS_LIVE",
                 symbol=symbol,
-                recommendation="BUY",
+                recommendation=recommendation,
                 score=70,
                 confidence=75,
                 reason=(
-                    f"Post-result catalyst (announced "
-                    f"today): {entry['headline'][:70]}"
+                    f"Post-result catalyst — {reason_tag} "
+                    f"(announced today): "
+                    f"{entry['headline'][:70]}"
                 ),
                 facts={
                     "event_type": "RESULTS_ANNOUNCED",
                     "state": "ANNOUNCED",
+                    "direction": direction or "UNKNOWN",
                 },
             )
         ]

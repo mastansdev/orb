@@ -489,6 +489,11 @@ class Engine:
         # Event-driven entry session state
         self._entered_today = set()
 
+        # Continuous news ingestion timer (2026-07-21)
+        from config import NEWS_INGEST_SECONDS
+        self._last_news_ingest = None
+        self._news_ingest_seconds = NEWS_INGEST_SECONDS
+
         # Auto-populate results calendar in background
         # (network must never delay startup)
         import threading as _threading
@@ -548,9 +553,63 @@ class Engine:
             self.monitor.set_last_trade(f"RECOVERED {trade['symbol']}")
             self.orb_engine.set_entry_taken(security_id)
 
+            # Fix (2026-07-21): _entered_today is what EVENT
+            # entries check (strategy.is_buy_signal's ORB
+            # path uses orb["entry_taken"] instead, already
+            # reconciled above via set_entry_taken -- but
+            # _entered_today was NEVER reconciled anywhere,
+            # confirmed live today causing repeated same-day
+            # re-entries on EVENT-mode trades after every
+            # kill-switch restart (INDIGO twice, DMART four
+            # times, with real repeat losses). Recovering an
+            # already-open position's symbol here is free, since
+            # we're already looping through self.trades.
+            self._entered_today.add(trade["symbol"])
+
         if self.trades:
             print(f"Recovered {len(self.trades)} open position(s).")
-            
+
+        # ---------------------------------
+        # Closed-Today Reconciliation for _entered_today
+        #
+        # Covers the other half: a symbol that already traded
+        # AND CLOSED earlier today (like DMART's first two
+        # stopped-out entries) still needs to be blocked from
+        # re-entering via EVENT after a restart, even
+        # though it's no longer in self.trades. Reads
+        # trade_log_v2.csv directly, self-contained -- no
+        # dependency on market_data.py wiring this time.
+        # ---------------------------------
+        try:
+            import csv as _csv
+            from datetime import date as _date
+            from config import TRADE_LOG_FILE
+
+            today_str = _date.today().strftime("%Y-%m-%d")
+            closed_today_count = 0
+
+            with open(
+                TRADE_LOG_FILE, "r", newline="", encoding="utf-8"
+            ) as f:
+                for row in _csv.DictReader(f):
+                    if row.get("Date") != today_str:
+                        continue
+                    symbol = row.get("Symbol", "")
+                    if symbol:
+                        self._entered_today.add(symbol)
+                        closed_today_count += 1
+
+            print(
+                f"[RECONCILE] {closed_today_count} closed-today "
+                f"trade(s) + {len(self.trades)} open position(s) "
+                f"= {len(self._entered_today)} symbol(s) protected "
+                f"from EVENT re-entry this restart."
+            )
+        except FileNotFoundError:
+            pass  # No trades logged yet today -- nothing to reconcile
+        except Exception as e:
+            print(f"[RECONCILE] _entered_today check failed: {e}")
+
         self.monitor.set_orb_completed(self.orb_engine.completed_count())
         self.monitor.set_status("RUNNING")
         self.monitor.set_connection("CONNECTED")
@@ -558,6 +617,28 @@ class Engine:
     def process_tick(self, security_id, symbol, ltp, ltt):
         try:
             self.monitor.increment_processed_ticks()
+
+            # ---------------------------------
+            # Continuous News Ingestion (2026-07-21)
+            #
+            # Railway stories used to be consumed ONLY
+            # inside evaluate() — no breakout, no news, no
+            # watchlist all day. Now every NEWS_INGEST_SECONDS
+            # the tick loop pulls fresh stories through the
+            # full intelligence chain (events → F&O watchlist
+            # → causal → graph), independent of breakouts.
+            # ---------------------------------
+            now = datetime.now()
+            if (
+                self._last_news_ingest is None
+                or (now - self._last_news_ingest).total_seconds()
+                >= self._news_ingest_seconds
+            ):
+                self._last_news_ingest = now
+                try:
+                    self.trade_selection_engine.ingest_news()
+                except Exception as e:
+                    print(f"[NEWS INGEST] {e}")
 
             # ---------------------------------
             # Tick Cache Update
@@ -615,6 +696,22 @@ class Engine:
                 state = self.market_state_engine.compute()
                 self.risk_governor.set_market_state(state)
                 self.shock_responder.check_market(state)
+
+                # Regime-adaptive conviction gate (2026-07-21):
+                # feed the same live regime data already used by
+                # RiskGovernor into the Brain, so its conviction
+                # threshold actually reflects current conditions
+                # instead of a permanent "NORMAL" placeholder.
+                # state is a dict here (confirmed from
+                # RiskGovernor.set_market_state's own
+                # state.get("regime", "WARMUP") usage), not an
+                # object -- matched that access style exactly.
+                self.trade_selection_engine.brain.set_market_regime(
+                    regime=state.get("regime", "WARMUP"),
+                    confidence=state.get("confidence", 0.0),
+                    description=state.get("description", ""),
+                    dominant_factor=state.get("dominant_factor", ""),
+                )
 
                 # News-feed staleness alarm: if Railway
                 # goes silent during market hours, say so
@@ -764,6 +861,12 @@ class Engine:
                     if event_candidate is not None:
                         signal = True
                         entry_mode = "EVENT"
+
+                # REMOVED 2026-07-21: Momentum-Runner path
+                # (pre-9:30 pure-price entries, no catalyst).
+                # It fired universe-wide at 09:16 and produced
+                # random trades. Core ideology: news arms the
+                # system; ORB breakout close pulls the trigger.
 
                 if signal:
                     print(f"\n========== LIVE {entry_mode} CANDIDATE ==========")
@@ -988,13 +1091,69 @@ class Engine:
 
                     new_risk = max(0.0, (ltp - stop_loss)) * qty
 
-                    risk_allowed, risk_reason = (
+                    new_conviction = getattr(
+                        brain.opportunity, "conviction", 0
+                    )
+
+                    risk_allowed, risk_reason, risk_replace_id = (
                         self.risk_governor.entry_allowed(
                             trades=self.trades,
                             new_risk=new_risk,
-                            sector=opportunity_sector
+                            sector=opportunity_sector,
+                            new_conviction=new_conviction,
                         )
                     )
+
+                    # --------------------------------------------------
+                    # REAL-TIME RISK GOVERNOR REPLACEMENT (2026-07-21)
+                    #
+                    # Fix for "no trader sits idle" -- confirmed live
+                    # that the 30s capital-allocation-cycle alone
+                    # wasn't fast/reliable enough (GAIL conviction
+                    # 95.4 and KARURVYSYA both expired unused while
+                    # blocked by this same heat/sector cap, with the
+                    # cycle's own 10-min minimum-hold window
+                    # preventing a swap at the exact moments they
+                    # appeared). This executes the swap immediately,
+                    # at the point of rejection, same pattern as the
+                    # existing PortfolioRiskManager REPLACE block
+                    # above.
+                    # --------------------------------------------------
+                    if risk_allowed and risk_replace_id is not None:
+                        weakest_trade = self.trades.get(
+                            risk_replace_id
+                        )
+
+                        if weakest_trade is not None:
+                            weakest_symbol = weakest_trade.get(
+                                "symbol", "?"
+                            )
+                            weakest_conviction = weakest_trade.get(
+                                "conviction", 0
+                            )
+
+                            weakest_trade["force_exit"] = True
+                            self.portfolio_risk_manager.remove_trade(
+                                weakest_symbol
+                            )
+
+                            print(
+                                f"♻️ RISK GOVERNOR REPLACE "
+                                f"{weakest_symbol} (conviction "
+                                f"{weakest_conviction:.1f}) with "
+                                f"{symbol} ({new_conviction:.1f}) "
+                                f"— {risk_reason}"
+                            )
+                            self.telegram.send(
+                                f"♻️ CAPITAL REALLOCATION "
+                                f"(real-time)\n\n"
+                                f"Out : {weakest_symbol} (weakest, "
+                                f"conviction "
+                                f"{weakest_conviction:.1f})\n"
+                                f"In  : {symbol} (conviction "
+                                f"{new_conviction:.1f})\n\n"
+                                f"{risk_reason}"
+                            )
 
                     if not risk_allowed:
                         print(f"🛑 RISK VETO : {symbol} — {risk_reason}")
@@ -1074,23 +1233,42 @@ class Engine:
                         None
                     )
 
-                    new_trade["sector"] = getattr(
-                        opportunity_intelligence,
-                        "dominant_sector",
-                        ""
-                    ) or ""
+                    # Fix (2026-07-21): dominant_* on the
+                    # intelligence snapshot is only populated
+                    # from EVENT facts and was empty on most
+                    # trades → every log row said UNKNOWN and
+                    # the sector cap / sector evidence saw
+                    # nothing. Fall back to the Master DB,
+                    # which always knows the sector.
+                    from core.master_loader import master_loader
 
-                    new_trade["industry"] = getattr(
-                        opportunity_intelligence,
-                        "dominant_industry",
-                        ""
-                    ) or ""
+                    new_trade["sector"] = (
+                        getattr(
+                            opportunity_intelligence,
+                            "dominant_sector", ""
+                        )
+                        or master_loader.get_sector(symbol)
+                        or ""
+                    )
 
-                    new_trade["theme"] = getattr(
-                        opportunity_intelligence,
-                        "dominant_theme",
-                        ""
-                    ) or ""
+                    new_trade["industry"] = (
+                        getattr(
+                            opportunity_intelligence,
+                            "dominant_industry", ""
+                        )
+                        or master_loader.get_industry(symbol)
+                        or ""
+                    )
+
+                    _themes = master_loader.get_themes(symbol)
+                    new_trade["theme"] = (
+                        getattr(
+                            opportunity_intelligence,
+                            "dominant_theme", ""
+                        )
+                        or (_themes[0] if _themes else "")
+                        or ""
+                    )
 
                     new_trade["conviction"] = getattr(
                         brain.opportunity,

@@ -122,7 +122,10 @@ DAILY_LOSS_INCLUDES_FLOATING = True
 KILL_SWITCH_EXIT_ALL = True
 
 # Pause new entries after N consecutive losing trades.
-MAX_CONSECUTIVE_LOSSES = 4
+# 0 = disabled. OFF 2026-07-21: with the catalyst gate,
+# trade count drops sharply; streak-pause was locking the
+# day on noise and forcing restarts.
+MAX_CONSECUTIVE_LOSSES = 0
 
 # Maximum simultaneous open positions in one sector.
 MAX_POSITIONS_PER_SECTOR = 3
@@ -170,7 +173,9 @@ RESULTS_DAY_BLOCK = True
 
 # Massive catalysts can trigger entry WITHOUT waiting
 # for an ORB breakout, any time before the cutoff.
-EVENT_ENTRY_ENABLED = True
+# OFF 2026-07-21: ONE trigger only — ORB breakout close
+# on a catalyst-armed stock. News arms; price triggers.
+EVENT_ENTRY_ENABLED = False
 EVENT_ENTRY_MIN_IMPORTANCE = 75     # watchlist catalyst strength
 EVENT_ENTRY_MIN_CONVICTION = 65     # higher bar than ORB entries
 EVENT_ENTRY_FRESH_MINUTES = 45      # catalyst must be this fresh
@@ -187,7 +192,7 @@ POSITION_REPLACEMENT_ENABLED = True
 
 # DAILY_MAX_LOSS / DAILY_MAX_PROFIT above become BASE
 # values; the governor scales them with market regime.
-ADAPTIVE_LIMITS_ENABLED = True
+ADAPTIVE_LIMITS_ENABLED = False   # OFF 2026-07-21: regime-scaled limits removed; fixed daily loss only
 
 # Regime multipliers (loss_mult, profit_mult)
 REGIME_LIMIT_MULTIPLIERS = {
@@ -203,6 +208,11 @@ REGIME_LIMIT_MULTIPLIERS = {
 # SHOCK PROTECTION
 # ==========================
 
+# Master switch for BOTH shock guards below (peak-giveback
+# + fast-drop). OFF 2026-07-21: simplified risk stack —
+# daily max loss + per-trade stops are the only kill rules.
+SHOCK_GUARDS_ENABLED = False
+
 # Peak-giveback guard (the +53k → -1.4L lesson):
 # once day profit exceeds the floor, giving back this
 # fraction of the peak = market reversal → exit all.
@@ -216,7 +226,7 @@ FAST_DROP_WINDOW_MINUTES = 10
 
 # Market-wide shock responder (breadth collapse →
 # flatten + weakest-sector PE recommendation)
-SHOCK_RESPONDER_ENABLED = True
+SHOCK_RESPONDER_ENABLED = False   # OFF 2026-07-21: simplified risk stack
 SHOCK_BREADTH_PCT = 20       # ≤20% stocks advancing
 SHOCK_AVG_CHANGE = -1.5      # and avg change ≤ -1.5%
 
@@ -235,12 +245,62 @@ PRICED_IN_WARN_PCT = 3.0
 PRICED_IN_FADE_PCT = 5.0
 
 # ==========================
+# CATALYST GATE  (core ideology: news arms, price triggers)
+# ==========================
+# REMOVED 2026-07-21: the MOMENTUM_ENTRY path (pre-9:30
+# buying on pure price strength, no news). It caused
+# random universe-wide entries at 09:16. One trigger
+# only: ORB breakout close, catalyst-armed.
+
+# An ORB breakout may ONLY become a trade if the symbol
+# has LIVE catalyst evidence (news event, F&O catalyst,
+# announced result, causal chain, or graph sympathy).
+# Naked breakouts — price with no story — are blocked.
+CATALYST_GATE_ENABLED = True
+
+# Evidence providers that count as a live catalyst.
+CATALYST_PROVIDERS = (
+    "EVENT",          # symbol-matched news → structured event
+    "FNO_CATALYST",   # live F&O catalyst watchlist
+    "RESULTS_LIVE",   # result announced today (positive)
+    "CAUSAL",         # active cause-effect chain touching symbol
+    "SYMPATHY",       # knowledge-graph spillover
+)
+
+# Minimum evidence score for a catalyst to arm a symbol.
+CATALYST_MIN_SCORE = 25
+
+# ==========================
+# ACTIVE MARKET SCANNER (second arming path)
+# ==========================
+# The bot must not depend ONLY on the news watchlist —
+# it actively scans the whole market. The TOP N strongest
+# stocks right now (by % change on live ticks) are also
+# "armed": if one of them breaks its ORB with a candle
+# close, it may trade even without a matched news story.
+# The market itself is the evidence — a stock leading 750
+# names is in play for a reason.
+# Entry still requires: ORB close breakout + Brain
+# conviction + Risk Governor. This is NOT the old momentum
+# path (no pre-9:30 entries, no 'any stock that moved
+# 1.5%' — only the day's real leaders).
+MARKET_SCAN_ENABLED = True
+MARKET_SCAN_TOP_N = 20          # today's leaders board size
+MARKET_SCAN_MIN_CHANGE_PCT = 2.0  # leader must be up ≥ this
+
+
+# ==========================
 # NEWS PIPELINE MONITOR
 # ==========================
 
 # During market hours, no story from Railway for this
 # long → Telegram alarm (feed break detection).
 NEWS_STALENESS_MINUTES = 45
+
+# Continuous ingestion: pull new Railway stories through
+# the full intelligence chain (events → watchlist → causal
+# → graph) every N seconds — independent of breakouts.
+NEWS_INGEST_SECONDS = 60
 
 # ==========================
 # HOLD BRAIN (continuous thesis re-evaluation)
@@ -249,7 +309,7 @@ NEWS_STALENESS_MINUTES = 45
 # deteriorates." Re-score every open position; exit when
 # the reason to own it has decayed.
 
-THESIS_ENGINE_ENABLED = True
+THESIS_ENGINE_ENABLED = False   # OFF 2026-07-21: was churning exits in seconds; simplified risk stack
 
 # Exit if current conviction falls below this fraction
 # of the conviction at entry (thesis has decayed).

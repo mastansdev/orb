@@ -61,6 +61,23 @@ class RailwayIntelligenceService:
             except Exception as e:
                 # 3. Prevent transient errors from killing the 24/7 service
                 logger.error(f"Error during intelligence collection: {e}", exc_info=True)
+
+                # 3b. SELF-HEAL (2026-07-21): Railway's Postgres
+                # proxy drops long-lived connections. Once dead,
+                # every cycle fails on the same broken connection
+                # forever — the service looks alive but produces
+                # nothing (observed: feed silent from 06:15).
+                # Rebuild the engine (fresh DB connection) so the
+                # next cycle starts clean.
+                try:
+                    logger.info("Rebuilding news engine (fresh DB connection)...")
+                    self.news_engine = RailwayNewsEngine()
+                    logger.info("News engine rebuilt OK.")
+                except Exception as rebuild_error:
+                    logger.error(
+                        f"Rebuild failed (will retry next cycle): {rebuild_error}"
+                    )
+
                 logger.info("Retrying in the next cycle...")
 
             # 4. Responsive sleep: checks for shutdown every second instead of blocking for 60s

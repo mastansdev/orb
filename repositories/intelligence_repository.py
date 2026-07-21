@@ -1,8 +1,25 @@
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from repositories.database import Database
 
 from news.news_models import MarketStory
+
+# ---------------------------------------------------------
+# IST-naive "now" (fix 2026-07-21)
+#
+# Railway servers run on UTC, so datetime.now() there wrote
+# UTC strings into created_at while the bot (IST machine)
+# compared them against IST — every story looked 5h30m
+# stale, staleness alarms misfired, and "stories today"
+# windows were shifted. All DB timestamps are now written
+# as NAIVE IST strings regardless of server timezone.
+# ---------------------------------------------------------
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def ist_now():
+    """Naive IST datetime — consistent on Railway and the bot."""
+    return datetime.now(IST).replace(tzinfo=None)
 
 class IntelligenceRepository:
 
@@ -155,7 +172,7 @@ class IntelligenceRepository:
 
             (
 
-                datetime.now().isoformat(),
+                ist_now().isoformat(),
 
                 getattr(story, "name", ""),
 
@@ -177,7 +194,7 @@ class IntelligenceRepository:
                 getattr(story, "expected_duration", ""),
                 getattr(story, "evidence_count", 0),
                 getattr(story, "contradiction_count", 0),
-                getattr(story, "updated_at", datetime.now().isoformat()),
+                getattr(story, "updated_at", ist_now().isoformat()),
                 list(getattr(story, "affected_symbols", []) or []),
 
             )
@@ -381,9 +398,10 @@ class IntelligenceRepository:
                 headline,
                 published_at,
                 url,
-                processed
+                processed,
+                created_at
             )
-            VALUES(%s,%s,%s,%s,%s,%s)
+            VALUES(%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (news_hash)
             DO NOTHING
             """,
@@ -394,6 +412,11 @@ class IntelligenceRepository:
                 str(news.published_at),
                 getattr(news, "url", ""),
                 False,
+                # Fix 2026-07-21: created_at was never
+                # written → always NULL → any "today's raw
+                # news" query silently returned 0.
+                # (IST-naive — see ist_now above.)
+                ist_now().isoformat(),
             )
         )
         self.db.commit()

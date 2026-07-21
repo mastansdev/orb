@@ -2,13 +2,56 @@
 
 ## Current Version
 
-**Version:** 3.3.0-INSTITUTIONAL-AI
+**Version:** 3.4.0-CATALYST-GATE
 
 ---
 
 ## Status
 
-🟢 Institutional layer live — paper trading validation next session
+🟢 Simplified to the core ideology (2026-07-21):
+**news arms the system; ORB breakout close pulls the trigger.**
+
+### v3.4.0 changes
+
+* **ONE entry trigger.** Removed the Momentum-Runner path
+  (pre-9:30 pure-price buys — source of the random 09:16
+  entries) and disabled event-driven no-ORB entries
+  (`EVENT_ENTRY_ENABLED = False`). The only trigger left:
+  a 1-min candle CLOSE above the ORB high, within limits.
+* **CATALYST GATE (new, `config.py`).** An ORB breakout may
+  only become a trade if the symbol carries live catalyst
+  evidence (EVENT / FNO_CATALYST / RESULTS_LIVE / CAUSAL /
+  SYMPATHY, score ≥ 25). Naked breakouts are rejected with
+  reason "NO LIVE CATALYST". Whole universe still scanned.
+* **Simplified risk stack.** Kept: per-trade stop, partial
+  + trail, profit lock, daily max loss kill switch, max
+  positions, heat cap, 15:15 flat. Disabled: thesis-decay
+  exits, shock responder, peak-giveback + fast-drop guards,
+  adaptive regime limits, consecutive-loss pause (=0).
+* **Sector fix.** Trade rows no longer log UNKNOWN — sector/
+  industry/theme now fall back to the Master Database.
+* **New tool:** `py tools/news_pipeline_check.py` — run
+  pre-market; verifies Railway → Postgres → symbols chain.
+  If it reports BROKEN, the bot will take zero trades that
+  day (catalyst gate working as designed) — fix Railway first.
+
+### v3.4.1 (same day)
+
+* **Continuous news ingestion.** Stories were only consumed
+  inside evaluate() — no breakout meant no news, no
+  watchlist, all day. The tick loop now runs
+  `ingest_news()` every `NEWS_INGEST_SECONDS` (60s), so the
+  watchlist builds continuously, independent of breakouts.
+* **UTC/IST fix.** Railway (UTC) timestamps made every
+  story look 5h30m stale on the IST bot. All DB timestamps
+  now written as naive IST (`ist_now()`); check tool
+  auto-detects legacy UTC rows. **Redeploy Railway.**
+* **ACTIVE MARKET SCANNER (second arming path).** The bot
+  actively scans the whole market: top
+  `MARKET_SCAN_TOP_N` (20) stocks by live % change (min
+  +2.0%) are armed even without matched news. ORB close
+  breakout + Brain + Risk still required. Not the old
+  momentum path — leaders only, no pre-9:30 entries.
 
 ---
 

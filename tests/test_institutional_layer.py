@@ -84,12 +84,12 @@ def test_risk_governor():
     governor = RiskGovernor(capital, controller, telegram=None)
 
     # Normal entry allowed
-    allowed, reason = governor.entry_allowed({}, 0, "")
+    allowed, reason, _ = governor.entry_allowed({}, 0, "")
     check("entry allowed when healthy", allowed)
 
     # Daily loss lockout
     capital.realized = -(DAILY_MAX_LOSS + 1)
-    allowed, reason = governor.entry_allowed({}, 0, "")
+    allowed, reason, _ = governor.entry_allowed({}, 0, "")
     check("daily loss blocks entry", not allowed)
     check("kill switch locked", governor.locked)
     check("entries disabled", not controller.entries)
@@ -98,7 +98,7 @@ def test_risk_governor():
 
     # Lock is permanent for the session
     capital.realized = 0
-    allowed, reason = governor.entry_allowed({}, 0, "")
+    allowed, reason, _ = governor.entry_allowed({}, 0, "")
     check("lock is permanent", not allowed)
 
     # Consecutive losses
@@ -106,11 +106,15 @@ def test_risk_governor():
     controller2 = FakeTradeController()
     governor2 = RiskGovernor(capital2, controller2, telegram=None)
 
-    for _ in range(MAX_CONSECUTIVE_LOSSES):
+    for _ in range(max(MAX_CONSECUTIVE_LOSSES, 3)):
         governor2.on_trade_closed(-100)
 
-    allowed, reason = governor2.entry_allowed({}, 0, "")
-    check("loss streak blocks entry", not allowed)
+    allowed, reason, _ = governor2.entry_allowed({}, 0, "")
+    if MAX_CONSECUTIVE_LOSSES > 0:
+        check("loss streak blocks entry", not allowed)
+    else:
+        # Simplified risk stack: streak pause disabled (=0)
+        check("loss streak pause disabled", allowed)
 
     # Winner resets streak
     governor3 = RiskGovernor(
@@ -132,7 +136,7 @@ def test_risk_governor():
     heat = governor4.portfolio_heat(trades)
     check("heat computed", heat == 1000.0)
 
-    allowed, reason = governor4.entry_allowed(
+    allowed, reason, _ = governor4.entry_allowed(
         trades, MAX_PORTFOLIO_HEAT, ""
     )
     check("heat cap blocks entry", not allowed)
@@ -147,12 +151,12 @@ def test_risk_governor():
     governor5 = RiskGovernor(
         FakeCapitalManager(), FakeTradeController(), None
     )
-    allowed, reason = governor5.entry_allowed(
+    allowed, reason, _ = governor5.entry_allowed(
         trades5, 0, "BANKING"
     )
     check("sector cap blocks entry", not allowed)
 
-    allowed, reason = governor5.entry_allowed(trades5, 0, "IT")
+    allowed, reason, _ = governor5.entry_allowed(trades5, 0, "IT")
     check("other sector still allowed", allowed)
 
 
@@ -1154,22 +1158,32 @@ def test_adaptive_and_shock():
         FakeCapitalManager(), FakeTradeController(), None
     )
 
-    # Regime adaptation
+    # Regime adaptation (simplified stack 2026-07-21:
+    # only asserted when the feature is enabled)
+    from config import ADAPTIVE_LIMITS_ENABLED
+
     governor.set_market_state({"regime": "BEARISH"})
-    check(
-        "bearish tightens loss limit",
-        governor.daily_max_loss < DAILY_MAX_LOSS
-    )
+    if ADAPTIVE_LIMITS_ENABLED:
+        check(
+            "bearish tightens loss limit",
+            governor.daily_max_loss < DAILY_MAX_LOSS
+        )
+    else:
+        check(
+            "adaptive limits OFF: loss limit fixed",
+            governor.daily_max_loss == DAILY_MAX_LOSS
+        )
 
     governor.set_market_state({"regime": "TRENDING_UP"})
     check(
         "trending restores loss limit",
         governor.daily_max_loss == DAILY_MAX_LOSS
     )
-    check(
-        "trending expands profit room",
-        governor.daily_max_profit > DAILY_MAX_LOSS
-    )
+    if ADAPTIVE_LIMITS_ENABLED:
+        check(
+            "trending expands profit room",
+            governor.daily_max_profit > DAILY_MAX_LOSS
+        )
 
     # Peak-giveback shock
     shock_fired = []
@@ -1180,22 +1194,34 @@ def test_adaptive_and_shock():
         lambda reason: shock_fired.append(reason)
     )
 
+    from config import SHOCK_GUARDS_ENABLED
+
     peak = PEAK_GUARD_MIN_PROFIT + 2000
     governor2.on_tick(peak)
-    check("peak tracked", governor2.day_peak_pnl == peak)
 
-    # Small dip: no shock
-    governor2.on_tick(peak * (1 - PEAK_GIVEBACK_PCT / 2))
-    check("small giveback tolerated", not governor2.locked)
+    if SHOCK_GUARDS_ENABLED:
+        check("peak tracked", governor2.day_peak_pnl == peak)
 
-    # Big giveback: shock
-    governor2.on_tick(peak * (1 - PEAK_GIVEBACK_PCT) - 1)
-    check("giveback fires kill switch", governor2.locked)
-    check("shock callback invoked", len(shock_fired) == 1)
-    check(
-        "reason mentions giveback",
-        "GIVEBACK" in governor2.lock_reason
-    )
+        # Small dip: no shock
+        governor2.on_tick(peak * (1 - PEAK_GIVEBACK_PCT / 2))
+        check("small giveback tolerated", not governor2.locked)
+
+        # Big giveback: shock
+        governor2.on_tick(peak * (1 - PEAK_GIVEBACK_PCT) - 1)
+        check("giveback fires kill switch", governor2.locked)
+        check("shock callback invoked", len(shock_fired) == 1)
+        check(
+            "reason mentions giveback",
+            "GIVEBACK" in governor2.lock_reason
+        )
+    else:
+        # Simplified stack: on_tick is a no-op — a huge
+        # giveback must NOT lock the day.
+        governor2.on_tick(peak * (1 - PEAK_GIVEBACK_PCT) - 1)
+        check(
+            "shock guards OFF: giveback ignored",
+            not governor2.locked and not shock_fired
+        )
 
     # Market state classification
     from intelligence.market_state_engine import (
@@ -1234,19 +1260,30 @@ def test_adaptive_and_shock():
         telegram=None,
     )
 
+    from config import SHOCK_RESPONDER_ENABLED
+
     fired = responder.check_market(
         {"breadth_pct": 10, "avg_change": -2.5}
     )
-    check("breadth collapse triggers responder", fired)
-    check("responder exits all", controller.exit_all)
-    check("responder disables entries", not controller.entries)
+    if SHOCK_RESPONDER_ENABLED:
+        check("breadth collapse triggers responder", fired)
+        check("responder exits all", controller.exit_all)
+        check(
+            "responder disables entries",
+            not controller.entries
+        )
 
-    # Only once per session
-    controller.exit_all = False
-    fired2 = responder.check_market(
-        {"breadth_pct": 5, "avg_change": -3.0}
-    )
-    check("responder fires once", not fired2)
+        # Only once per session
+        controller.exit_all = False
+        fired2 = responder.check_market(
+            {"breadth_pct": 5, "avg_change": -3.0}
+        )
+        check("responder fires once", not fired2)
+    else:
+        check(
+            "shock responder OFF: never fires",
+            not fired and not controller.exit_all
+        )
 
     # Reset price engine state for other tests
     for sym in symbols:
@@ -1732,12 +1769,13 @@ def test_watchlist_and_decisions():
         wl.build_evidence("RESULTCO") == []
     )
 
-    # Result publishes → ANNOUNCED
+    # Result publishes (POSITIVE) → ANNOUNCED
     wl.on_event({
         "symbol": "RESULTCO",
         "event_type": "RESULTS_BEAT",
         "catalyst": "RESULTS",
         "importance": 70,
+        "direction": "POSITIVE",
         "headline": "RESULTCO Q1 profit up 22%",
     })
     check("result event → announced", wl.is_announced("RESULTCO"))
@@ -1752,6 +1790,26 @@ def test_watchlist_and_decisions():
         "catalyst is bullish",
         ev[0].recommendation == "BUY"
         and ev[0].provider == "RESULTS_LIVE"
+    )
+
+    # Direction-aware (2026-07-21): a BAD result must NOT
+    # become BUY evidence — it must come through as SELL
+    # so the catalyst gate refuses to arm the stock.
+    calendar.add("WEAKCO", today)
+    wl2 = ResultsWatchlist(results_calendar=calendar)
+    wl2.on_event({
+        "symbol": "WEAKCO",
+        "event_type": "RESULTS_MISS",
+        "catalyst": "RESULTS",
+        "importance": 70,
+        "direction": "NEGATIVE",
+        "headline": "WEAKCO Q1 loss widens",
+    })
+    ev_weak = wl2.build_evidence("WEAKCO")
+    check(
+        "bad result → SELL evidence (not armed)",
+        len(ev_weak) == 1
+        and ev_weak[0].recommendation == "SELL"
     )
 
     # QUIETCO still watching (no event)
@@ -1830,19 +1888,27 @@ def test_hold_brain_and_profit_lock():
     a = eng.advise("X", trade, 100)
     check("thesis intact → HOLD", a["action"] == "HOLD")
 
-    # Thesis decayed (current 30 < floor 44) → EXIT
+    # Thesis decayed (current 30 < floor 44)
+    from config import THESIS_ENGINE_ENABLED
     eng2 = PositionThesisEngine(
         FakeSelection(30), FakeIntel()
     )
     a2 = eng2.advise("X", trade, 100)
-    check(
-        "thesis decayed → THESIS_EXIT",
-        a2["action"] == "THESIS_EXIT"
-    )
-    check(
-        "exit reason explains decay",
-        "decayed" in a2["reason"]
-    )
+    if THESIS_ENGINE_ENABLED:
+        check(
+            "thesis decayed → THESIS_EXIT",
+            a2["action"] == "THESIS_EXIT"
+        )
+        check(
+            "exit reason explains decay",
+            "decayed" in a2["reason"]
+        )
+    else:
+        # Simplified stack: HOLD brain off — never exits.
+        check(
+            "thesis engine OFF: always HOLD",
+            a2["action"] == "HOLD"
+        )
 
     # Grace period: fresh entry never thesis-exits
     from datetime import datetime as _now_dt

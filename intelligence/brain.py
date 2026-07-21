@@ -397,6 +397,64 @@ class Brain:
         self.minimum_score = 60
 
     # --------------------------------------------------
+    # Regime-Adaptive Conviction Gate (2026-07-21)
+    #
+    # Fix: self.market_regime existed but was NEVER updated after
+    # __init__ -- it sat at its "NORMAL" default forever, so the
+    # conviction gate applied the exact same flat CONVICTION_MIN_SCORE
+    # threshold regardless of actual market condition. A trader
+    # naturally raises their bar in a choppy/bearish tape (thin,
+    # noisy signal -- only take clearly strong setups) and can
+    # afford to be closer to normal in a genuine uptrend (real
+    # opportunity is already abundant, no need to loosen further).
+    # This was a real, named gap -- the bot wasn't doing that.
+    #
+    # This is a STARTING POINT, not a backtested optimum -- same
+    # honesty as the trail/velocity-guard tuning: watch how it
+    # behaves live and adjust these numbers.
+    # --------------------------------------------------
+    REGIME_CONVICTION_ADJUSTMENT = {
+        "TRENDING_UP":   -5,   # slightly more permissive
+        "TRENDING_DOWN": +10,  # bot is long-only -- be more selective
+        "BEARISH":       +15,  # same reasoning, more severe
+        "CHOPPY":        +10,  # thin/noisy signal -- raise the bar
+        "FLAT":          +8,   # muted signal -- raise the bar somewhat
+        "WARMUP":        0,    # not enough data yet to judge regime
+        "NORMAL":        0,    # default/fallback
+    }
+
+    # Never let the adjustment push the effective bar to an
+    # unreasonable extreme in either direction.
+    MIN_EFFECTIVE_THRESHOLD = 40
+    MAX_EFFECTIVE_THRESHOLD = 85
+
+    def set_market_regime(self, regime, confidence=0.0, description="", dominant_factor=""):
+        """
+        Feed live regime data in -- call this periodically (e.g.
+        from engine.py's existing 30s market-state refresh, the
+        same place risk_governor.set_market_state() already gets
+        called) so the conviction gate actually reflects current
+        conditions instead of a permanent "NORMAL" placeholder.
+        """
+        self.market_regime = MarketRegime(
+            regime=regime,
+            confidence=confidence,
+            description=description,
+            dominant_factor=dominant_factor,
+        )
+
+    def _effective_conviction_threshold(self, base_threshold):
+        regime = getattr(self.market_regime, "regime", "NORMAL")
+        adjustment = self.REGIME_CONVICTION_ADJUSTMENT.get(regime, 0)
+
+        effective = base_threshold + adjustment
+
+        return max(
+            self.MIN_EFFECTIVE_THRESHOLD,
+            min(self.MAX_EFFECTIVE_THRESHOLD, effective)
+        )
+
+    # --------------------------------------------------
 
     # --------------------------------------------------
 
@@ -661,17 +719,7 @@ class Brain:
             if provider == "SECTOR":
 
                 intelligence.sector_strength = score
-                # Fix (2026-07-20): evidence_builder.py passes the
-                # RAW sector snapshot as facts, which uses "name"
-                # as the key (e.g. {'name': 'BANKING', 'rank': 15,
-                # ...}) -- not "sector_name", which never existed
-                # in this dict at all. Confirmed live: this always
-                # fell through to the "UNKNOWN" default, which is
-                # what broke both trade_log_v2.csv's sector column
-                # and RiskGovernor's sector-cap veto ("Sector cap:
-                # 3 open positions in UNKNOWN" instead of the real
-                # sector, e.g. BANKING).
-                intelligence.dominant_sector = facts.get("name", "UNKNOWN")
+                intelligence.dominant_sector = facts.get("sector_name", "UNKNOWN")
 
             # ----------------------------
             # Industry
@@ -680,8 +728,7 @@ class Brain:
             elif provider == "INDUSTRY":
 
                 intelligence.industry_strength = score
-                # Same key-mismatch fix as SECTOR above.
-                intelligence.dominant_industry = facts.get("name", "UNKNOWN")
+                intelligence.dominant_industry = facts.get("industry_name", "UNKNOWN")
 
             # ----------------------------
             # Theme
@@ -690,8 +737,7 @@ class Brain:
             elif provider == "THEME":
 
                 intelligence.theme_strength = score
-                # Same key-mismatch fix as SECTOR above.
-                intelligence.dominant_theme = facts.get("name", "UNKNOWN")
+                intelligence.dominant_theme = facts.get("theme_name", "UNKNOWN")
 
             # ----------------------------
             # News
@@ -1211,12 +1257,21 @@ class Brain:
 
                 from config import CONVICTION_MIN_SCORE
 
-                if conviction_score < CONVICTION_MIN_SCORE:
+                effective_threshold = self._effective_conviction_threshold(
+                    CONVICTION_MIN_SCORE
+                )
+
+                if conviction_score < effective_threshold:
                     action = DecisionAction.WAIT
+                    regime = getattr(
+                        self.market_regime, "regime", "NORMAL"
+                    )
                     warnings.append(
                         f"Conviction gate: "
                         f"{conviction_score:.1f} < "
-                        f"{CONVICTION_MIN_SCORE} "
+                        f"{effective_threshold} "
+                        f"(base {CONVICTION_MIN_SCORE}, "
+                        f"regime={regime}) "
                         f"({snapshot.get('grade')})"
                     )
 

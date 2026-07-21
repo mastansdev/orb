@@ -35,83 +35,51 @@ class TradeSelectionEngine:
         self.stories_received = 0
         self.last_story_time = None
 
-    # --------------------------------------------------
-
-    def attach_intelligence(
-        self,
-        pattern_engine=None,
-        company_intelligence=None,
-        event_intelligence=None,
-        fno_engine=None,
-        knowledge_graph=None,
-        results_calendar=None,
-        calendar_harvester=None,
-        causal_engine=None
-    ):
-        """
-        Called by the Engine after construction to wire
-        memory-driven intelligence layers.
-        """
-        self.pattern_engine = pattern_engine
-        self.company_intelligence = company_intelligence
-        self.event_intelligence = event_intelligence
-        self.fno_engine = fno_engine
-        self.knowledge_graph = knowledge_graph
-        self.results_calendar = results_calendar
-        self.calendar_harvester = calendar_harvester
-        self.causal_engine = causal_engine
+        # Rolling cache of MARKET_STORY evidence built by
+        # timer-driven ingest cycles between breakouts, so
+        # a breakout evaluated minutes later still sees the
+        # narrative evidence (30-min freshness window).
+        self._news_evidence_cache = []   # (datetime, Evidence)
 
     # --------------------------------------------------
 
-    def evaluate(
-        self,
-        symbol,
-        ltp,
-        orb,
-        intelligence,
-        entry_mode="ORB"
-    ):
-        self.breakouts += 1
+    def ingest_news(self):
+        """
+        Pull new Railway stories and push them through EVERY
+        intelligence layer: company memory, results calendar,
+        structured events, F&O catalyst watchlist, causal
+        chains, knowledge-graph spillover.
 
-        # ---------------------------------
-        # Structural ORB Validation (Early Gate)
-        # EVENT entries (Rule-001 catalyst override)
-        # bypass the ORB structure gate — their gate
-        # is the higher conviction bar downstream.
-        # ---------------------------------
-        if entry_mode != "EVENT":
-            orb_result = self._score_orb(orb)
-            if not orb_result["passed"]:
-                self.skipped += 1
-                return self._build_decision(
-                    selected=False,
-                    score=0,
-                    reasons=[orb_result["reason"]],
-                    brain_decision=None
-                )
+        Fix (2026-07-21): this used to live inline in
+        evaluate(), so news was ONLY ingested when a breakout
+        was already being evaluated — no breakout, no
+        watchlist, ever. Now the Engine calls this on a timer
+        (every NEWS_INGEST_SECONDS) from the tick loop, so
+        the watchlist builds continuously all day.
 
-        # ---------------------------------
-        # Institutional Decision Pipeline
-        # ---------------------------------
-        evidence = self.evidence_builder.build(intelligence)
+        Returns fresh news evidence (newly built + cached
+        from recent cycles, 30-minute window).
+        """
+        from datetime import datetime as _dt, timedelta as _td
 
         self.brain.update_intelligence()
 
-        news_evidence = self.brain.build_news_evidence()
-        print(f"[BRAIN] News Evidence Loaded : {len(news_evidence)}")
+        new_evidence = self.brain.build_news_evidence()
+        if new_evidence:
+            print(
+                f"[BRAIN] News Evidence Loaded : "
+                f"{len(new_evidence)}"
+            )
 
         # Pipeline health: prove the Railway → Brain
         # link is alive (consumed by /news + alarm)
         if self.brain.pending_stories:
-            from datetime import datetime as _dt
             self.stories_received += len(
                 self.brain.pending_stories
             )
             self.last_story_time = _dt.now()
 
-        # ---------------------------------
         # Company Memory : record stories
-        # ---------------------------------
         if self.company_intelligence is not None:
             for story in self.brain.pending_stories:
                 try:
@@ -119,10 +87,8 @@ class TradeSelectionEngine:
                 except Exception:
                     pass
 
-        # ---------------------------------
         # Calendar Harvester : board-meeting
         # intimations → results calendar
-        # ---------------------------------
         if self.calendar_harvester is not None:
             for story in self.brain.pending_stories:
                 try:
@@ -132,10 +98,8 @@ class TradeSelectionEngine:
                 except Exception:
                     pass
 
-        # ---------------------------------
         # Event Intelligence : stories →
         # structured events → F&O watchlist
-        # ---------------------------------
         if self.event_intelligence is not None:
             for story in self.brain.pending_stories:
                 try:
@@ -182,6 +146,128 @@ class TradeSelectionEngine:
                                 )[-100:]
                 except Exception as e:
                     print(f"[EVENT] {e}")
+
+        # Refresh the rolling cache (30-min window)
+        now = _dt.now()
+        self._news_evidence_cache = [
+            (t, ev) for t, ev in self._news_evidence_cache
+            if now - t <= _td(minutes=30)
+        ] + [(now, ev) for ev in new_evidence]
+
+        return [ev for _, ev in self._news_evidence_cache]
+
+    # --------------------------------------------------
+
+    def attach_intelligence(
+        self,
+        pattern_engine=None,
+        company_intelligence=None,
+        event_intelligence=None,
+        fno_engine=None,
+        knowledge_graph=None,
+        results_calendar=None,
+        calendar_harvester=None,
+        causal_engine=None
+    ):
+        """
+        Called by the Engine after construction to wire
+        memory-driven intelligence layers.
+        """
+        self.pattern_engine = pattern_engine
+        self.company_intelligence = company_intelligence
+        self.event_intelligence = event_intelligence
+        self.fno_engine = fno_engine
+        self.knowledge_graph = knowledge_graph
+        self.results_calendar = results_calendar
+        self.calendar_harvester = calendar_harvester
+        self.causal_engine = causal_engine
+
+    # --------------------------------------------------
+
+    def _market_scan_rank(self, symbol):
+        """
+        ACTIVE MARKET SCANNER (2026-07-21).
+
+        Returns the symbol's 1-based rank among today's top
+        gainers if it qualifies as a market leader, else None.
+
+        Qualifies when BOTH hold:
+          • up ≥ MARKET_SCAN_MIN_CHANGE_PCT vs prev close
+          • within the top MARKET_SCAN_TOP_N of the whole
+            universe by % change (live ticks)
+
+        This arms genuine stocks-in-play even when no news
+        story was matched — the tape itself is the evidence.
+        """
+        from config import (
+            MARKET_SCAN_ENABLED,
+            MARKET_SCAN_TOP_N,
+            MARKET_SCAN_MIN_CHANGE_PCT,
+        )
+
+        if not MARKET_SCAN_ENABLED:
+            return None
+
+        from intelligence.price_engine import price_engine
+
+        my_change = price_engine.get_change(symbol)
+        if (
+            my_change is None
+            or my_change < MARKET_SCAN_MIN_CHANGE_PCT
+        ):
+            return None
+
+        stronger = 0
+        for other, data in price_engine.prices.items():
+            if other == symbol:
+                continue
+            ch = data.get("change")
+            if ch is not None and ch > my_change:
+                stronger += 1
+                if stronger >= MARKET_SCAN_TOP_N:
+                    return None
+
+        return stronger + 1
+
+    # --------------------------------------------------
+
+    def evaluate(
+        self,
+        symbol,
+        ltp,
+        orb,
+        intelligence,
+        entry_mode="ORB"
+    ):
+        self.breakouts += 1
+
+        # ---------------------------------
+        # Structural ORB Validation (Early Gate)
+        # EVENT entries (Rule-001 catalyst override)
+        # bypass the ORB structure gate — their gate
+        # is the higher conviction bar downstream.
+        # ---------------------------------
+        if entry_mode != "EVENT":
+            orb_result = self._score_orb(orb)
+            if not orb_result["passed"]:
+                self.skipped += 1
+                return self._build_decision(
+                    selected=False,
+                    score=0,
+                    reasons=[orb_result["reason"]],
+                    brain_decision=None
+                )
+
+        # ---------------------------------
+        # Institutional Decision Pipeline
+        # ---------------------------------
+        evidence = self.evidence_builder.build(intelligence)
+
+        # Pull anything new that arrived since the last
+        # ingest cycle (the engine also calls ingest_news
+        # on a timer — see Engine.process_tick — so the
+        # watchlist builds even on days with no breakouts).
+        news_evidence = self.ingest_news()
 
         # ---------------------------------
         # Pattern Evidence (memory-driven)
@@ -380,6 +466,77 @@ class TradeSelectionEngine:
         validated_evidence = self.evidence_validator.validate(
             all_evidence
         )
+
+        # ---------------------------------
+        # CATALYST GATE (core ideology, 2026-07-21)
+        #
+        # "News arms the system; price confirmation pulls
+        # the trigger." An ORB breakout with NO live
+        # catalyst on the symbol is a naked breakout —
+        # blocked, no matter how pretty the chart is.
+        # The whole universe is still scanned, but only
+        # catalyst-armed symbols may trade.
+        # (EVENT entries carry their own catalyst by
+        # construction — the F&O watchlist entry.)
+        # ---------------------------------
+        from config import (
+            CATALYST_GATE_ENABLED,
+            CATALYST_PROVIDERS,
+            CATALYST_MIN_SCORE,
+        )
+
+        if CATALYST_GATE_ENABLED and entry_mode != "EVENT":
+            catalysts = [
+                ev for ev in validated_evidence
+                if ev.provider in CATALYST_PROVIDERS
+                and str(ev.recommendation).upper() not in (
+                    "SELL", "AVOID"
+                )
+                and ev.score >= CATALYST_MIN_SCORE
+            ]
+
+            # Second arming path: ACTIVE MARKET SCAN.
+            # No matched news? The stock can still trade if
+            # it is one of today's true leaders — top N of
+            # the whole universe by % change on live ticks.
+            scan_rank = None
+            if not catalysts:
+                scan_rank = self._market_scan_rank(symbol)
+
+            if not catalysts and scan_rank is None:
+                self.skipped += 1
+                return self._build_decision(
+                    selected=False,
+                    score=0,
+                    reasons=[
+                        f"{symbol}: NOT ARMED — no live "
+                        f"catalyst "
+                        f"({'/'.join(CATALYST_PROVIDERS)} "
+                        f"≥ {CATALYST_MIN_SCORE}) and not in "
+                        f"today's market-scan leaders. "
+                        f"Naked breakout blocked."
+                    ],
+                    brain_decision=None
+                )
+
+            if catalysts:
+                print(
+                    f"[CATALYST GATE] {symbol} armed by: "
+                    + "; ".join(
+                        f"{ev.provider}({ev.score:.0f})"
+                        for ev in catalysts[:3]
+                    )
+                )
+            else:
+                from intelligence.price_engine import (
+                    price_engine as _pe,
+                )
+                print(
+                    f"[MARKET SCAN] {symbol} armed: "
+                    f"#{scan_rank} strongest in market "
+                    f"({_pe.get_change(symbol):+.2f}%)"
+                )
+
         conviction = self.conviction_engine.evaluate(validated_evidence)
 
         if conviction.get("summary"):
