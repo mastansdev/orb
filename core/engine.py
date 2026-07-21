@@ -425,6 +425,19 @@ class Engine:
             event_intelligence=self.event_intelligence,
         )
 
+        # News Watchlist : which symbols currently have a live
+        # news story attached (counterpart to the results
+        # watchlist above, for non-scheduled catalysts).
+        from intelligence.news_watchlist import NewsWatchlist
+        self.news_watchlist = NewsWatchlist()
+
+        # Dashboard Bridge (2026-07-21) : file-based command/
+        # state channel to the separate dashboard.py process --
+        # powers the interactive Sell / Check Now / Schedule
+        # Check controls. See core/dashboard_bridge.py.
+        from core.dashboard_bridge import DashboardBridge
+        self.dashboard_bridge = DashboardBridge(self)
+
         # Calendar Harvester : auto-populate the
         # calendar from board-meeting intimations
         from intelligence.calendar_harvester import CalendarHarvester
@@ -471,6 +484,9 @@ class Engine:
         self.trade_selection_engine.results_watchlist = (
             self.results_watchlist
         )
+        self.trade_selection_engine.news_watchlist = (
+            self.news_watchlist
+        )
 
         # Market State + Shock Responder
         self.market_state_engine = market_state_engine
@@ -494,6 +510,15 @@ class Engine:
         from config import NEWS_INGEST_SECONDS
         self._last_news_ingest = None
         self._news_ingest_seconds = NEWS_INGEST_SECONDS
+
+        # Dashboard live-price sync timer (2026-07-21) -- see
+        # process_tick() for why this exists: open_positions.json
+        # was previously only rewritten on entry/partial-book/exit
+        # and never carried a live price, so dashboard.py's Open
+        # Positions table showed a live PnL that never moved for
+        # the life of a trade.
+        self._last_dashboard_sync = None
+        self._dashboard_sync_seconds = 2
 
         # Auto-populate results calendar in background
         # (network must never delay startup)
@@ -694,6 +719,59 @@ class Engine:
                 total_mtm += (current_price - position["entry_price"]) * position["qty"]
 
             self.capital_manager.set_floating_mtm(total_mtm)
+
+            # ---------------------------------
+            # Dashboard Live-Price Sync (2026-07-21, throttled)
+            # ---------------------------------
+            # self.trades (keyed by security_id, same dict
+            # position_recovery.save() writes to open_positions.json)
+            # never carried a live price -- it was only ever
+            # re-saved on entry/partial-book/exit, so dashboard.py's
+            # Open Positions table's "Live PnL" column showed a
+            # value that never changed for the whole life of a
+            # trade. This refreshes ltp/live_pnl on every open
+            # trade dict from the same tick_cache already used for
+            # floating MTM above, and re-saves -- throttled to once
+            # every few seconds (not every tick) since this is a
+            # full JSON rewrite, not a hot-path calculation.
+            if (
+                self._last_dashboard_sync is None
+                or (now - self._last_dashboard_sync).total_seconds()
+                >= self._dashboard_sync_seconds
+            ):
+                self._last_dashboard_sync = now
+
+                if self.trades:
+                    try:
+                        for sid, trade in self.trades.items():
+                            tick = self.tick_cache.get(sid)
+                            if tick is None:
+                                continue
+                            live_ltp = tick["ltp"]
+                            trade["ltp"] = live_ltp
+                            trade["live_pnl"] = round(
+                                (live_ltp - trade.get("entry", 0))
+                                * trade.get("qty", 0),
+                                2,
+                            )
+                        self.position_recovery.save(self.trades)
+                    except Exception as e:
+                        print(f"[DASHBOARD SYNC] {e}")
+
+                # Interactive dashboard bridge (2026-07-21):
+                # process any Sell / Check Now / Schedule Check
+                # commands the dashboard wrote, fire any
+                # scheduled checks whose time has arrived, and
+                # publish fresh watchlist/response state for the
+                # dashboard to read. Same throttle as the
+                # position sync above -- all file I/O, no need
+                # to do this every single tick.
+                try:
+                    self.dashboard_bridge.process_commands()
+                    self.dashboard_bridge.run_due_schedules()
+                    self.dashboard_bridge.write_state()
+                except Exception as e:
+                    print(f"[DASHBOARD BRIDGE] {e}")
 
             # --------------------------------------------------
             # Shock Guards + Adaptive Limits
@@ -1398,6 +1476,16 @@ class Engine:
                     result = self.EXIT_SYSTEM
                 elif self.trade_controller.is_exit_all_requested():
                     result = self.EXIT_MANUAL
+                elif self.trade_controller.is_exit_requested(
+                    security_id
+                ):
+                    # Per-position manual Sell (dashboard button,
+                    # 2026-07-21) -- same EXIT_MANUAL reason as
+                    # exit-all, just scoped to this one position.
+                    result = self.EXIT_MANUAL
+                    self.trade_controller.clear_exit_requested(
+                        security_id
+                    )
                 else:
                     result = self.risk_manager.update(trade, ltp, ltt)
 
@@ -2447,6 +2535,11 @@ class Engine:
 
     def watchlist_report(self):
         return self.results_watchlist.report()
+
+    # --------------------------------------------------
+
+    def news_watchlist_report(self):
+        return self.news_watchlist.report()
 
     # --------------------------------------------------
 

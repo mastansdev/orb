@@ -33,6 +33,7 @@ import sqlite3
 from datetime import datetime
 from http.server import (
     HTTPServer,
+    ThreadingHTTPServer,
     BaseHTTPRequestHandler,
 )
 
@@ -41,6 +42,13 @@ PORT = 8181
 TRADE_LOG = "trade_log_v2.csv"
 RECORDER_DB = "market_recorder.db"
 POSITIONS_FILE = "open_positions.json"
+
+# Interactive dashboard bridge (2026-07-21) -- dashboard.py and
+# main.py are separate processes, so commands/state cross
+# between them the same way everything else here does: files.
+# See core/dashboard_bridge.py on the engine side.
+COMMANDS_FILE = "dashboard_commands.json"
+STATE_FILE = "dashboard_state.json"
 
 
 # ==========================================================
@@ -153,6 +161,60 @@ def load_positions():
         return positions
     except Exception:
         return []
+
+
+_EMPTY_STATE = {
+    "news_watchlist": [],
+    "results_watchlist": {"watching": [], "announced": []},
+    "scheduled_pending": [],
+    "responses": [],
+    "updated_at": "",
+}
+
+
+def load_dashboard_state():
+    """
+    Everything the engine only has in-process: both
+    watchlists, pending scheduled checks, and recent command
+    responses (Sell/Check Now/Schedule Check outcomes).
+    Written by core/dashboard_bridge.py on the same throttle
+    as the rest of the dashboard sync.
+    """
+    if not os.path.exists(STATE_FILE):
+        return dict(_EMPTY_STATE)
+
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            data = json.load(f) or {}
+        merged = dict(_EMPTY_STATE)
+        merged.update(data)
+        return merged
+    except Exception:
+        return dict(_EMPTY_STATE)
+
+
+def write_command(command):
+    """
+    Appends one command to dashboard_commands.json for the
+    engine to pick up on its next poll (every couple of
+    seconds). Simple read-modify-write -- acceptable for
+    low-frequency, single-user button clicks; the engine
+    clears the file after each batch it processes.
+    """
+    commands = []
+    if os.path.exists(COMMANDS_FILE):
+        try:
+            with open(COMMANDS_FILE, encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, list):
+                commands = loaded
+        except Exception:
+            commands = []
+
+    commands.append(command)
+
+    with open(COMMANDS_FILE, "w", encoding="utf-8") as f:
+        json.dump(commands, f)
 
 
 def load_pnl_series(limit=3000):
@@ -345,6 +407,29 @@ PAGE = """<!DOCTYPE html>
   .daterange button { background:var(--blue); color:#fff; border:none;
                        border-radius:5px; padding:5px 12px; font-size:12px;
                        cursor:pointer; }
+  .sellbtn { background:var(--red); color:#fff; border:none;
+             border-radius:5px; padding:3px 10px; font-size:11px;
+             cursor:pointer; }
+  .sellbtn:hover { opacity:.85; }
+  .brain-controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+                     margin-bottom:12px; }
+  .brain-controls input { background:#0d1117; border:1px solid var(--border);
+                      color:var(--text); border-radius:5px; padding:6px 8px;
+                      font-size:12px; }
+  .brain-controls input#brainSymbol { width:110px; text-transform:uppercase; }
+  .brain-controls button { background:var(--blue); color:#fff; border:none;
+                       border-radius:5px; padding:6px 12px; font-size:12px;
+                       cursor:pointer; }
+  .brain-controls button.secondary { background:#30363d; }
+  .resp { border-bottom:1px solid #21262d; padding:9px 0; font-size:13px; }
+  .resp:last-child { border-bottom:none; }
+  .resp .tagline { color:var(--dim); font-size:11px; margin:3px 0; }
+  .resp details summary { cursor:pointer; color:var(--blue); font-size:11px;
+                           margin-top:4px; }
+  .resp pre { white-space:pre-wrap; font-size:11px; color:var(--text);
+              margin-top:4px; background:#0d1117; padding:6px; border-radius:5px; }
+  .chiplist { font-size:12px; color:var(--text); }
+  .watchcard .l { margin-bottom:4px; }
 </style>
 </head>
 <body>
@@ -366,7 +451,7 @@ PAGE = """<!DOCTYPE html>
     <h2>Open positions</h2>
     <table id="positions"><thead><tr>
       <th>Symbol</th><th>Entry</th><th>Stop</th><th>Target</th>
-      <th>Qty</th><th>Time</th><th>Live PnL</th>
+      <th>Qty</th><th>Time</th><th>Live PnL</th><th></th>
     </tr></thead><tbody></tbody></table>
   </div>
 </div>
@@ -378,6 +463,34 @@ PAGE = """<!DOCTYPE html>
     <th>Sector</th><th>Qty</th><th>In</th><th>Out</th>
     <th>PnL</th><th>Hold</th><th>Exit Reason</th><th>Conviction</th>
   </tr></thead><tbody></tbody></table>
+</div>
+
+<!-- Watchlists -->
+<div class="grid two" style="margin-top:14px">
+  <div class="card">
+    <h2>News watchlist — live, rolling 30-min</h2>
+    <table id="newsWatchlist"><thead><tr>
+      <th>Symbol</th><th>Direction</th><th>Confidence</th>
+      <th>Age</th><th>Headline</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card watchcard">
+    <h2>Results watchlist — today</h2>
+    <div id="resultsWatchlist"></div>
+  </div>
+</div>
+
+<!-- Interactive: ask the brain -->
+<div class="card" style="margin-top:14px">
+  <h2>Ask the brain</h2>
+  <div class="brain-controls">
+    <input id="brainSymbol" placeholder="SYMBOL" maxlength="20">
+    <button onclick="checkNow()">Check now</button>
+    <input id="brainTime" placeholder="HH:MM" maxlength="5" style="width:70px">
+    <button class="secondary" onclick="scheduleCheck()">Schedule check</button>
+  </div>
+  <div class="sub" id="scheduledPending" style="margin:0 0 10px"></div>
+  <div id="brainResponses"></div>
 </div>
 
 <!-- BOTTOM: all-time / historical, with date-range filter -->
@@ -525,13 +638,16 @@ async function refresh(){
   document.querySelector('#positions tbody').innerHTML =
     d.positions.length ? d.positions.map(p=>{
       const pnlCls = (p.live_pnl||0)>=0 ? 'pos':'neg';
+      const sid = (p.security_id||'').toString().replace(/"/g,'&quot;');
+      const sym = (p.symbol||'').toString().replace(/"/g,'&quot;');
       return `<tr><td><b>${p.symbol}</b></td><td>${p.entry}</td>
        <td>${p.stop_loss}</td><td>${p.target}</td><td>${p.qty}</td>
        <td>${p.entry_time}</td>
        <td class="${pnlCls}">${fmtOrDash(p.live_pnl)}</td>
+       <td><button class="sellbtn" onclick="sellPosition('${sid}','${sym}')">Sell</button></td>
        </tr>`;
     }).join('')
-    : '<tr><td colspan="7" style="color:#8b949e">No open positions</td></tr>';
+    : '<tr><td colspan="8" style="color:#8b949e">No open positions</td></tr>';
 
   // Trades table — TODAY's closed trades only.
   const todayTrades = d.trades_today || [];
@@ -550,6 +666,108 @@ async function refresh(){
         <td>${x.conviction}</td></tr>`;
     }).join('')
     : '<tr><td colspan="12" style="color:#8b949e">No trades closed today yet</td></tr>';
+
+  // News watchlist
+  const nw = d.news_watchlist || [];
+  document.querySelector('#newsWatchlist tbody').innerHTML =
+    nw.length ? nw.map(n=>{
+      const ageMin = Math.max(0, Math.round(
+        (Date.now() - new Date(n.since).getTime()) / 60000));
+      return `<tr><td><b>${n.symbol}</b></td><td>${n.direction||'—'}</td>
+        <td>${n.confidence}</td><td>${ageMin}m</td>
+        <td style="color:#8b949e">${(n.headline||'').slice(0,80)}</td></tr>`;
+    }).join('')
+    : '<tr><td colspan="5" style="color:#8b949e">No active news catalysts</td></tr>';
+
+  // Results watchlist
+  const rw = d.results_watchlist || {watching:[], announced:[]};
+  document.getElementById('resultsWatchlist').innerHTML = `
+    <div style="margin-bottom:10px">
+      <div class="l">WATCHING — reports today, entries blocked (${(rw.watching||[]).length})</div>
+      <div class="chiplist">${(rw.watching||[]).join(', ') || '—'}</div>
+    </div>
+    <div>
+      <div class="l">ANNOUNCED — live catalyst (${(rw.announced||[]).length})</div>
+      <div class="chiplist">${(rw.announced||[]).join(', ') || '—'}</div>
+    </div>`;
+
+  // Scheduled pending checks
+  const sched = d.scheduled_pending || [];
+  document.getElementById('scheduledPending').textContent =
+    sched.length
+      ? 'Pending: ' + sched.map(s=>`${s.symbol}@${s.at}`).join(', ')
+      : '';
+
+  // Brain responses (Check Now / Schedule / Sell outcomes)
+  renderResponses(d.responses || []);
+}
+
+function renderResponses(responses){
+  const el = document.getElementById('brainResponses');
+  if(!responses.length){
+    el.innerHTML = '<div style="color:#8b949e;font-size:12px">'
+      + 'No checks yet — type a symbol above and click Check now.</div>';
+    return;
+  }
+  el.innerHTML = responses.map(r=>{
+    if(r.error){
+      return `<div class="resp"><b>${r.type}</b> ${r.symbol||''} — `
+        + `<span class="neg">${r.error}</span></div>`;
+    }
+    if(r.type==='SELL'){
+      return `<div class="resp"><b>SELL</b> ${r.symbol||''} — ${r.message||''}</div>`;
+    }
+    if(r.type==='SCHEDULE_CHECK'){
+      return `<div class="resp"><b>SCHEDULED</b> ${r.symbol||''} — ${r.message||''}</div>`;
+    }
+    // CHECK_NOW / SCHEDULED_CHECK_FIRED
+    const snap = r.snapshot || {};
+    const conv = snap.conviction || {};
+    const label = r.type==='SCHEDULED_CHECK_FIRED'
+      ? ` (scheduled ${r.scheduled_for})` : '';
+    const resultsLine = snap.results_state
+      ? `<div class="tagline">Results watchlist: ${snap.results_state}</div>` : '';
+    const newsLine = snap.news_state
+      ? `<div class="tagline">News: ${(snap.news_state.headline||'').slice(0,90)}</div>` : '';
+    const history = (r.history||'').toString()
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    return `<div class="resp">
+      <b>${r.symbol}</b>${label} — Conviction ${conv.score ?? 0} (${conv.grade || 'N/A'})
+      <div class="tagline">${conv.summary || ''}</div>
+      ${resultsLine}${newsLine}
+      <details><summary>Decision history</summary><pre>${history}</pre></details>
+    </div>`;
+  }).join('');
+}
+
+async function sellPosition(securityId, symbol){
+  if(!confirm(`Sell ${symbol} now at the live market price? (PAPER mode)`)) return;
+  await fetch('/api/sell', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({security_id: securityId, symbol: symbol})
+  });
+  setTimeout(refresh, 1200);
+}
+
+async function checkNow(){
+  const symbol = document.getElementById('brainSymbol').value.trim().toUpperCase();
+  if(!symbol) return;
+  await fetch('/api/check', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({symbol})
+  });
+  setTimeout(refresh, 1200);
+}
+
+async function scheduleCheck(){
+  const symbol = document.getElementById('brainSymbol').value.trim().toUpperCase();
+  const at = document.getElementById('brainTime').value.trim();
+  if(!symbol || !at) return;
+  await fetch('/api/schedule', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({symbol, at})
+  });
+  setTimeout(refresh, 1200);
 }
 
 refresh();
@@ -593,6 +811,7 @@ class Handler(BaseHTTPRequestHandler):
             trades_today = [
                 t for t in trades if t["date"] == today
             ]
+            state = load_dashboard_state()
             payload = {
                 "summary": summary(trades),
                 "trades": trades,
@@ -600,6 +819,16 @@ class Handler(BaseHTTPRequestHandler):
                 "positions": load_positions(),
                 "pnl_series": load_pnl_series(),
                 "by_hour": hour_analysis(trades),
+                "news_watchlist": state.get("news_watchlist", []),
+                "results_watchlist": state.get(
+                    "results_watchlist",
+                    {"watching": [], "announced": []},
+                ),
+                "scheduled_pending": state.get(
+                    "scheduled_pending", []
+                ),
+                "responses": state.get("responses", []),
+                "state_updated_at": state.get("updated_at", ""),
             }
             self._send(
                 json.dumps(payload),
@@ -624,9 +853,81 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def do_POST(self):
+        """
+        Interactive controls (2026-07-21): Sell / Check Now /
+        Schedule Check. Each just appends a command to
+        dashboard_commands.json for the engine process to pick
+        up on its next poll -- this handler never touches a
+        broker or the engine's in-memory state directly (it
+        can't; it's a separate process). Sell only ever
+        requests a PAPER-mode simulated close at the live
+        price -- see core/dashboard_bridge.py and the exit
+        pipeline in core/engine.py for what actually happens.
+        """
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            body = {}
+
+        if self.path == "/api/sell":
+            write_command({
+                "type": "SELL",
+                "security_id": str(body.get("security_id", "")),
+                "symbol": body.get("symbol", ""),
+            })
+            self._send(
+                json.dumps({"ok": True}), "application/json"
+            )
+
+        elif self.path == "/api/check":
+            symbol = str(body.get("symbol", "")).strip().upper()
+            if not symbol:
+                self._send(
+                    json.dumps(
+                        {"ok": False, "error": "No symbol given"}
+                    ),
+                    "application/json",
+                )
+                return
+            write_command({
+                "type": "CHECK_NOW",
+                "symbol": symbol,
+            })
+            self._send(
+                json.dumps({"ok": True}), "application/json"
+            )
+
+        elif self.path == "/api/schedule":
+            symbol = str(body.get("symbol", "")).strip().upper()
+            at = str(body.get("at", "")).strip()
+            if not symbol or not at:
+                self._send(
+                    json.dumps({
+                        "ok": False,
+                        "error": "Need a symbol and a time (HH:MM)",
+                    }),
+                    "application/json",
+                )
+                return
+            write_command({
+                "type": "SCHEDULE_CHECK",
+                "symbol": symbol,
+                "at": at,
+            })
+            self._send(
+                json.dumps({"ok": True}), "application/json"
+            )
+
+        else:
+            self.send_response(404)
+            self.end_headers()
+
 
 def main():
-    server = HTTPServer(("127.0.0.1", PORT), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print("=" * 55)
     print("  ORB AUTO TRADER DASHBOARD")
     print("=" * 55)

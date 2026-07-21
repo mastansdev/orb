@@ -35,6 +35,13 @@ class TradeController:
         # One-shot request
         self._exit_all_requested = False
 
+        # Per-symbol manual exit requests (2026-07-21) --
+        # keyed by security_id. Same one-shot semantics as
+        # exit-all above, just scoped to a single position --
+        # this is what powers the dashboard's per-position
+        # Sell button (PAPER-mode simulated manual close).
+        self._exit_requested_ids = set()
+
     # --------------------------------------------------
     # Trading Controls
     # --------------------------------------------------
@@ -82,3 +89,19 @@ class TradeController:
     def is_exit_all_requested(self):
         with self._lock:
             return self._exit_all_requested
+
+    # --------------------------------------------------
+    # Per-Symbol Manual Exit (2026-07-21)
+    # --------------------------------------------------
+
+    def request_exit_symbol(self, security_id):
+        with self._lock:
+            self._exit_requested_ids.add(security_id)
+
+    def clear_exit_requested(self, security_id):
+        with self._lock:
+            self._exit_requested_ids.discard(security_id)
+
+    def is_exit_requested(self, security_id):
+        with self._lock:
+            return security_id in self._exit_requested_ids

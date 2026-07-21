@@ -203,6 +203,26 @@ class ResultsWatchlist:
 
     # --------------------------------------------------
 
+    def as_dict(self):
+        """
+        Dashboard-friendly serialization -- plain symbol
+        lists, no internal state exposed.
+        """
+        self._refresh_if_new_day()
+
+        watching = sorted([
+            s for s, e in self.today.items()
+            if e["state"] == "WATCHING"
+        ])
+        announced = sorted([
+            s for s, e in self.today.items()
+            if e["state"] == "ANNOUNCED"
+        ])
+
+        return {"watching": watching, "announced": announced}
+
+    # --------------------------------------------------
+
     def report(self):
         self._refresh_if_new_day()
 

@@ -55,6 +55,7 @@ class TelegramCommandCenter:
             "/shockmodel": self.cmd_shockmodel,
             "/premarket": self.cmd_premarket,
             "/watchlist": self.cmd_watchlist,
+            "/newswatch": self.cmd_news_watchlist,
             "/why": self.cmd_why,
             "/news": self.cmd_news,
             "/profile": self.cmd_profile,
@@ -455,6 +456,13 @@ class TelegramCommandCenter:
 
     # ---------------------------------
 
+    def cmd_news_watchlist(self, args):
+        self.engine.telegram.send(
+            f"📰 {self.engine.news_watchlist_report()}"
+        )
+
+    # ---------------------------------
+
     def cmd_why(self, args):
         if not args:
             self.engine.telegram.send("Usage: /why SYMBOL")
@@ -605,6 +613,7 @@ class TelegramCommandCenter:
             "/causal [SYMBOL] — cause-effect chains\n"
             "/premarket — pre-market intelligence brief\n"
             "/watchlist — today's results watchlist\n"
+            "/newswatch — live news watchlist (30-min)\n"
             "/why SYMBOL — every decision on a stock\n"
             "/shockmodel — reaction decay (1st>2nd)\n"
             "/decay TYPE — decay for one event type\n"

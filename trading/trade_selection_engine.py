@@ -32,6 +32,7 @@ class TradeSelectionEngine:
         self.fno_engine = None
         self.knowledge_graph = None
         self.results_calendar = None
+        self.news_watchlist = None
 
         # Rolling spillovers from recent events
         self._recent_spillovers = []
@@ -91,6 +92,24 @@ class TradeSelectionEngine:
                     self.company_intelligence.record_story(story)
                 except Exception:
                     pass
+
+        # News Watchlist : which symbols currently have a live
+        # story attached (dashboard + /newswatch visibility).
+        # Same affected_symbols fan-out as Brain.build_news_
+        # evidence() -- only symbols the story actually named,
+        # never a sector-wide guess.
+        if self.news_watchlist is not None:
+            for story in self.brain.pending_stories:
+                try:
+                    symbols = getattr(
+                        story, "affected_symbols", None
+                    ) or []
+                    for symbol in symbols:
+                        self.news_watchlist.on_story(
+                            str(symbol).upper(), story
+                        )
+                except Exception as e:
+                    print(f"[NEWS WATCHLIST] {e}")
 
         # Calendar Harvester : board-meeting
         # intimations → results calendar
@@ -184,6 +203,110 @@ class TradeSelectionEngine:
         ] + [(now, ev) for ev in new_evidence]
 
         return [ev for _, ev in self._news_evidence_cache]
+
+    # --------------------------------------------------
+    # Read-only opinion snapshot (2026-07-21)
+    # --------------------------------------------------
+    # For the dashboard's "check now" / "schedule a check"
+    # interactive controls. Deliberately NOT evaluate() --
+    # evaluate() is the real breakout pipeline: it counts
+    # attempts, gates on ORB structure, and (further down,
+    # outside this class) can lead to an actual order. This
+    # method only ever READS whatever real evidence already
+    # exists for the symbol right now (the same rolling news
+    # cache, the same company/event/F&O evidence builders used
+    # for real trades) and scores it with the same
+    # ConvictionEngine -- so the number shown is honestly
+    # computed, not fabricated -- but nothing here can ever
+    # place a trade, touch the opportunity pool, or affect
+    # portfolio risk state.
+
+    def snapshot_opinion(self, symbol):
+        symbol = str(symbol).upper().strip()
+        evidence = []
+
+        # News: read the existing rolling cache directly rather
+        # than calling ingest_news() again -- that method has
+        # real side effects (pulls fresh stories, records company
+        # events, harvests the calendar, feeds F&O/causal/graph)
+        # that should only run on the engine's own timer, not
+        # once per manual dashboard click.
+        try:
+            evidence += [
+                ev for _, ev in self._news_evidence_cache
+                if ev.symbol.upper() == symbol
+            ]
+        except Exception as e:
+            print(f"[SNAPSHOT] news cache: {e}")
+
+        if self.company_intelligence is not None:
+            try:
+                evidence += self.company_intelligence.build_evidence(
+                    symbol
+                )
+            except Exception as e:
+                print(f"[SNAPSHOT] company evidence: {e}")
+
+        if self.event_intelligence is not None:
+            try:
+                evidence += self.event_intelligence.build_evidence(
+                    symbol
+                )
+            except Exception as e:
+                print(f"[SNAPSHOT] event evidence: {e}")
+
+        if self.fno_engine is not None:
+            try:
+                evidence += self.fno_engine.build_evidence(symbol)
+            except Exception as e:
+                print(f"[SNAPSHOT] fno evidence: {e}")
+
+        results_state = None
+        rw = getattr(self, "results_watchlist", None)
+        if rw is not None:
+            try:
+                if rw.is_watching(symbol):
+                    results_state = (
+                        "WATCHING (reports today, entries blocked)"
+                    )
+                elif rw.is_announced(symbol):
+                    results_state = "ANNOUNCED (live catalyst)"
+            except Exception:
+                pass
+
+        news_state = None
+        if self.news_watchlist is not None:
+            try:
+                entry = self.news_watchlist.get(symbol)
+                if entry:
+                    news_state = dict(entry)
+                    news_state["since"] = entry["since"].isoformat()
+            except Exception:
+                pass
+
+        try:
+            conviction = self.conviction_engine.evaluate(evidence)
+        except Exception as e:
+            conviction = {
+                "score": 0, "grade": "N/A",
+                "summary": f"scoring failed: {e}",
+            }
+
+        from datetime import datetime as _dt2
+        return {
+            "symbol": symbol,
+            "checked_at": _dt2.now().isoformat(),
+            "evidence_count": len(evidence),
+            "conviction": conviction,
+            "results_state": results_state,
+            "news_state": news_state,
+            "note": (
+                "Read-only preview -- evidence that already "
+                "exists right now, scored the same way real "
+                "trades are. Not a live breakout evaluation "
+                "(no ORB gate) and can never place an order."
+            ),
+        }
 
     # --------------------------------------------------
     # Sector-sensitivity fan-out helpers (2026-07-21)
