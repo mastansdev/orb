@@ -138,7 +138,16 @@ class NewsClassifier:
             # any of the taxonomy-only signals combined.
             signal_score += 4.0
 
-        max_signal_score = 8.0
+        # Fix (2026-07-22): this denominator must equal the true
+        # maximum achievable signal_score. The six checks above
+        # add 1+1+1+1+1+4 = 9 when every one hits, but this was
+        # hardcoded to 8 -- so a fully-matched story scored
+        # (9/8)*100 = 112.5, exceeding the intended 0-100 bound.
+        # Confirmed live 2026-07-22: VEDL and HINDZINC both showed
+        # confidence=112 on the News Watchlist, reproducing this
+        # exact arithmetic. A partially-matched story (5 of 6)
+        # landed at exactly 100 -- also consistent with this bug.
+        max_signal_score = 9.0
         computed_confidence = round(
             (signal_score / max_signal_score) * 100
         )

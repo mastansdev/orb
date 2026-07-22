@@ -13,6 +13,16 @@ TESTS = [
     "tests/test_strategy.py",
     "tests/test_capital_manager.py",
     "tests/test_position_manager.py",
+    # Added 2026-07-22: judgment tests, not just mechanics --
+    # runs real news scenarios (including the actual tariff
+    # story that caused today's loss) through the real pipeline
+    # and asserts the DECISION is correct, not just that the
+    # code executes without crashing. This class of test was
+    # completely missing before, which is exactly how the
+    # always-WAIT recommendation stub and the always-STRENGTHENING
+    # story_direction bug went unnoticed through 23/23 + 6/6
+    # green runs.
+    "tests/test_news_pipeline_scenarios.py",
     "tools/smoke_test.py",
 ]
 

@@ -1,5 +1,7 @@
 from datetime import datetime
 import os
+import threading
+import time
 from dotenv import load_dotenv
 from core.historical_data import HistoricalData
 from notifications.telegram_notifier import TelegramNotifier
@@ -534,10 +536,28 @@ class Engine:
         # Event-driven entry session state
         self._entered_today = set()
 
-        # Continuous news ingestion timer (2026-07-21)
+        # Continuous news ingestion timer (2026-07-21, moved to
+        # its own thread 2026-07-22 -- see start_news_thread())
         from config import NEWS_INGEST_SECONDS
         self._last_news_ingest = None
         self._news_ingest_seconds = NEWS_INGEST_SECONDS
+
+        # Fix (2026-07-22): ingest_news() used to only run from
+        # inside process_tick, throttled -- meaning it never ran
+        # AT ALL until the first tick arrived (~09:07-09:15),
+        # even though Railway's news collection runs 24/7. A
+        # major story breaking pre-market (like today's tariff
+        # announcement) sat completely unread until the market
+        # opened. Now runs on its own background thread from the
+        # moment the Engine is constructed, independent of ticks.
+        # Lock serializes access since main.py's tick thread also
+        # reads structures this touches (news_watchlist, opportunity
+        # pool, fno watchlist) -- only one thread ever calls
+        # ingest_news() now (this one), the lock just protects
+        # against overlap if a cycle runs long.
+        self._news_ingest_lock = threading.Lock()
+        self._news_thread_stop = threading.Event()
+        self._news_thread = None
 
         # Dashboard live-price sync timer (2026-07-21) -- see
         # process_tick() for why this exists: open_positions.json
@@ -695,26 +715,16 @@ class Engine:
             self.monitor.increment_processed_ticks()
 
             # ---------------------------------
-            # Continuous News Ingestion (2026-07-21)
+            # Continuous News Ingestion
             #
-            # Railway stories used to be consumed ONLY
-            # inside evaluate() — no breakout, no news, no
-            # watchlist all day. Now every NEWS_INGEST_SECONDS
-            # the tick loop pulls fresh stories through the
-            # full intelligence chain (events → F&O watchlist
-            # → causal → graph), independent of breakouts.
+            # Fix (2026-07-22): this used to run HERE, gated
+            # behind tick arrival -- meaning it never ran before
+            # the first tick of the day. Moved to its own
+            # background thread (see start_news_thread()) so it
+            # runs from process start regardless of market hours.
+            # Nothing left to do here; kept this comment so the
+            # history is visible to whoever reads this next.
             # ---------------------------------
-            now = datetime.now()
-            if (
-                self._last_news_ingest is None
-                or (now - self._last_news_ingest).total_seconds()
-                >= self._news_ingest_seconds
-            ):
-                self._last_news_ingest = now
-                try:
-                    self.trade_selection_engine.ingest_news()
-                except Exception as e:
-                    print(f"[NEWS INGEST] {e}")
 
             # ---------------------------------
             # Tick Cache Update
@@ -786,6 +796,7 @@ class Engine:
             # floating MTM above, and re-saves -- throttled to once
             # every few seconds (not every tick) since this is a
             # full JSON rewrite, not a hot-path calculation.
+            now = datetime.now()
             if (
                 self._last_dashboard_sync is None
                 or (now - self._last_dashboard_sync).total_seconds()
@@ -2174,8 +2185,59 @@ class Engine:
                 break
 
 
+    # --------------------------------------------------
+    # Background News Ingestion Thread (2026-07-22)
+    # --------------------------------------------------
+
+    def start_news_thread(self):
+        """
+        Call once after construction (main.py does this right
+        after creating the Engine). Runs ingest_news() on its
+        own timer from process start, independent of whether
+        any ticks have arrived yet -- fixes news sitting unread
+        until market open (see comment at process_tick's old
+        ingestion block, and #7 in the after-close punch list).
+        """
+        if self._news_thread is not None:
+            return
+
+        def _loop():
+            print(
+                f"[NEWS THREAD] Started -- ingesting every "
+                f"{self._news_ingest_seconds}s, independent "
+                f"of ticks."
+            )
+            while not self._news_thread_stop.is_set():
+                try:
+                    with self._news_ingest_lock:
+                        self.trade_selection_engine.ingest_news()
+                    self._last_news_ingest = datetime.now()
+                except Exception as e:
+                    print(f"[NEWS THREAD] {e}")
+
+                # Responsive to stop requests instead of one
+                # long sleep -- same pattern already used for
+                # the reconnect backoff loop in market_data.py.
+                for _ in range(self._news_ingest_seconds):
+                    if self._news_thread_stop.is_set():
+                        break
+                    time.sleep(1)
+
+            print("[NEWS THREAD] Stopped.")
+
+        self._news_thread = threading.Thread(
+            target=_loop, daemon=True, name="news-ingest"
+        )
+        self._news_thread.start()
+
+    def stop_news_thread(self):
+        self._news_thread_stop.set()
+
+    # --------------------------------------------------
+
     def shutdown(self):
         # Persist today's sector leadership before closing
+        self.stop_news_thread()
         self.record_sector_memory()
         self.market_recorder.close()
 

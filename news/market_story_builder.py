@@ -56,7 +56,18 @@ class MarketStoryBuilder:
         """
         story = MarketStory(
             story_id=str(uuid.uuid4()),
-            name=classified_news.theme
+            # Fix (2026-07-22): this fell back through theme ->
+            # industry -> sector -> category, but never checked
+            # the actual headline text -- so any story where
+            # theme/industry were blank (the common case) showed
+            # a bare sector code (POWER, BANKING, METALS...) as
+            # its "headline" on the News Watchlist. Confirmed
+            # live: VEDL/HINDZINC/TORNTPOWER/TATAPOWER/BAJAJ-AUTO/
+            # BANDHANBNK all showed this. The real headline was
+            # sitting right there in classified_news.headline the
+            # whole time, just never used as the first choice.
+            name=classified_news.headline
+            or classified_news.theme
             or classified_news.industry
             or classified_news.sector
             or classified_news.category
@@ -127,13 +138,103 @@ class MarketStoryBuilder:
         )
 
         # --------------------------------------------------
-        # Confidence Growth
+        # Dominant-signal adoption (fix, 2026-07-22)
+        #
+        # BUG: event_type/category/subcategory/catalyst/sector/
+        # industry/theme/priority were only ever set once, at
+        # _create_story() -- merging never touched them again, no
+        # matter how many more specific, better-classified news
+        # items merged in afterward. A story whose FIRST headline
+        # happened to be vague (event_type=UNKNOWN) stayed UNKNOWN
+        # forever, even after absorbing 20 real, specific headlines.
+        # This directly contradicts this module's own stated job
+        # ("2. Detect dominant catalyst... 5. Detect dominant
+        # theme") -- it never actually looked for a dominant signal,
+        # just kept the oldest one.
+        #
+        # Confirmed live: TCS/RELIANCE stories displaying event_type
+        # =UNKNOWN, and non-order-related banks (BANKINDIA,
+        # UNIONBANK, BAJAJFINSV, JIOFIN, POLICYBZR) showing
+        # LARGE_ORDER_WIN -- all consistent with a stale first-item
+        # tag never being refreshed by later, better evidence.
+        #
+        # Fix: adopt the incoming item's classification whenever it
+        # is MORE SPECIFIC (non-UNKNOWN) than what the story
+        # currently has. Also track the best (max) priority seen,
+        # not just the first.
+        # --------------------------------------------------
+        if (
+            classified_news.event_type
+            and classified_news.event_type != "UNKNOWN"
+            and (not story.event_type or story.event_type == "UNKNOWN")
+        ):
+            story.event_type = classified_news.event_type
+
+        if (
+            classified_news.category
+            and classified_news.category != "UNKNOWN"
+            and (not story.category or story.category == "UNKNOWN")
+        ):
+            story.category = classified_news.category
+
+        if (
+            classified_news.subcategory
+            and classified_news.subcategory != "UNKNOWN"
+            and (
+                not story.subcategory
+                or story.subcategory == "UNKNOWN"
+            )
+        ):
+            story.subcategory = classified_news.subcategory
+
+        if classified_news.catalyst and not story.catalyst:
+            story.catalyst = classified_news.catalyst
+
+        if classified_news.sector and not story.sector:
+            story.sector = classified_news.sector
+
+        if classified_news.industry and not story.industry:
+            story.industry = classified_news.industry
+
+        if classified_news.theme and not story.theme:
+            story.theme = classified_news.theme
+
+        if story.name == "UNKNOWN" and classified_news.headline:
+            story.name = classified_news.headline
+
+        if (classified_news.priority or 0) > (story.priority or 0):
+            story.priority = classified_news.priority
+
+        # --------------------------------------------------
+        # Confidence Growth (fix, 2026-07-22)
+        #
+        # BUG: +2 per merge, unconditionally, regardless of whether
+        # the merging item carried any real signal. A story could
+        # reach the max 100 confidence purely by volume -- e.g. a
+        # routine dividend notice reprinted by 15 wire services --
+        # completely disconnected from actual event significance.
+        # This is what let DIVIDEND-tagged stories (BHARTIARTL,
+        # HEROMOTOCO) reach imp=100, same as a genuinely rare,
+        # high-conviction event.
+        #
+        # Fix: only grow confidence when the incoming item itself
+        # carries real signal (its own confidence indicates matched
+        # taxonomy dimensions, not a bare UNKNOWN/UNKNOWN reprint),
+        # and scale the growth by how strong that evidence is.
+        # Low-signal reprints can still raise the floor (if this
+        # reprint alone somehow scores higher than the current
+        # story) but no longer get a free +2 just for existing.
         # --------------------------------------------------
         news_confidence = classified_news.confidence or 0
-        story.confidence = min(
-            100,
-            max(story.confidence, news_confidence) + 2
-        )
+
+        if news_confidence >= 40:
+            growth = 2 if news_confidence >= 60 else 1
+            story.confidence = min(
+                100,
+                max(story.confidence, news_confidence) + growth
+            )
+        else:
+            story.confidence = max(story.confidence, news_confidence)
 
         story.story_strength = story.confidence
 

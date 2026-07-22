@@ -508,6 +508,36 @@ class Brain:
                 story
             )
 
+            # Fix (2026-07-22): story_direction used to be
+            # hardcoded "STRENGTHENING" at creation and on every
+            # merge (market_story_builder.py), regardless of
+            # what the story was actually about -- WEAKENING and
+            # CONTRADICTED were never assigned anywhere in the
+            # codebase, confirmed by exhaustive search. Every
+            # downstream consumer that branches on this field
+            # (FNO_CATALYST evidence, RESULTS_LIVE evidence, the
+            # old EVENT_ENTRY bearish guard) could therefore
+            # never actually see a bearish signal, no matter how
+            # bad the news was. Now derived from the real impact
+            # assessment computed just above -- same weighting
+            # news_evidence_builder._score() already uses, so
+            # the two stay consistent. Mutates the SAME object
+            # trade_selection_engine.ingest_news() later passes
+            # to news_watchlist.on_story(), so the dashboard
+            # picks up the real direction too, not just entry
+            # evidence.
+            net_impact = (
+                impact.market_score * 3
+                + impact.sector_score * 2
+                + impact.stock_score
+            )
+            if net_impact > 0:
+                story.story_direction = "STRENGTHENING"
+            elif net_impact < 0:
+                story.story_direction = "WEAKENING"
+            else:
+                story.story_direction = "NEUTRAL"
+
             for symbol in symbols:
                 if not symbol:
                     continue

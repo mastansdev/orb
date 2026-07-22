@@ -98,6 +98,27 @@ class IntelligenceRepository:
 
         self.db.commit()
 
+        # Fix (2026-07-22): story_direction was computed correctly
+        # in memory (MarketStoryBuilder sets STRENGTHENING on
+        # creation, and updates it as evidence accumulates) but
+        # was never part of this table -- save_story() had no
+        # column to write it into, so it was silently dropped on
+        # every save. _row_to_story() then had nothing real to
+        # read back and hardcoded "UNKNOWN" on every single row.
+        # Confirmed live 2026-07-22: every entry on the News
+        # Watchlist showed direction=UNKNOWN, no exceptions --
+        # this is why. Same safe additive pattern as
+        # affected_symbols above: existing rows are unaffected,
+        # old rows just read back as NULL -> "UNKNOWN" fallback.
+        self.cursor.execute(
+        """
+        ALTER TABLE market_stories
+        ADD COLUMN IF NOT EXISTS story_direction TEXT
+        """
+        )
+
+        self.db.commit()
+
         self.cursor.execute(
         """
 
@@ -162,11 +183,12 @@ class IntelligenceRepository:
                 evidence_count,
                 contradiction_count,
                 updated_at,
-                affected_symbols
-                
+                affected_symbols,
+                story_direction
+
             )
 
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
 
             """,
 
@@ -196,6 +218,7 @@ class IntelligenceRepository:
                 getattr(story, "contradiction_count", 0),
                 getattr(story, "updated_at", ist_now().isoformat()),
                 list(getattr(story, "affected_symbols", []) or []),
+                getattr(story, "story_direction", "") or "STRENGTHENING",
 
             )
 
@@ -227,7 +250,14 @@ class IntelligenceRepository:
             confidence=row[11],
             story_strength=row[12],
 
-            story_direction="UNKNOWN",
+            # Fix (2026-07-22): read the real column (added at
+            # index 20, after affected_symbols) instead of the
+            # old hardcoded "UNKNOWN". Falls back to "UNKNOWN"
+            # only for rows saved before this fix existed (which
+            # genuinely have no direction data to recover).
+            story_direction=(
+                row[20] if len(row) > 20 and row[20] else "UNKNOWN"
+            ),
 
             priority=row[13],
             lifecycle=row[14],

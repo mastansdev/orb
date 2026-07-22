@@ -1362,6 +1362,128 @@ RESULT_KEYWORDS = {
 }
 
 # ==========================================================
+# General Sentiment (added 2026-07-22)
+#
+# Fix: impact_rules.py's IMPACT_RULES only ever covers 3 of
+# the 12 categories news_classifier.py can actually detect
+# (CORPORATE, BROKERAGE, AI_IMPACT) -- GOVERNMENT, ORDER,
+# MERGER, ACQUISITION, PROMOTER, MARKET, COMMODITY, and MACRO
+# all had zero rule coverage, so any story in those categories
+# silently fell into a flat zero-impact default regardless of
+# content. Confirmed live 2026-07-22: a real Trump tariff
+# story on pharma imports landed in MACRO and got exactly this
+# treatment -- treated as if nothing had happened.
+#
+# This is a general-purpose fallback, not a replacement for
+# the specific IMPACT_RULES matches (which stay higher-priority
+# and higher-confidence when they hit). It exists so an
+# uncovered category still produces an honest, real signal
+# instead of silence. A hardcoded rule list will always lag
+# real-world event variety -- this is meant to catch what the
+# specific rules haven't been written for yet, not to be
+# perfectly precise. See news/impact_engine.py for how this
+# combines with a matched rule vs. the true no-signal case.
+# ==========================================================
+
+SENTIMENT_KEYWORDS = {
+
+    "NEGATIVE": [
+        "tariff",
+        "tariffs",
+        "ban",
+        "banned",
+        "penalty",
+        "penalised",
+        "penalized",
+        "fine",
+        "fined",
+        "raid",
+        "probe",
+        "investigation",
+        "downgrade",
+        "downgraded",
+        "cut",
+        "cuts",
+        "decline",
+        "declines",
+        "recall",
+        "recalled",
+        "lawsuit",
+        "sued",
+        "default",
+        "defaults",
+        "bankruptcy",
+        "insolvency",
+        "layoff",
+        "layoffs",
+        "job cuts",
+        "restriction",
+        "restrictions",
+        "suspended",
+        "suspension",
+        "ban on imports",
+        "import ban",
+        "export ban",
+        "sanction",
+        "sanctions",
+        "warning",
+        "delay",
+        "delayed",
+        "strike",
+        "shutdown",
+        "shut down",
+        "closure",
+        "boycott",
+        "curb",
+        "curbs",
+        "crackdown",
+        "anti-dumping",
+        "duty hike",
+        "duty increase",
+    ],
+
+    "POSITIVE": [
+        "approval",
+        "approved",
+        "clearance",
+        "cleared",
+        "upgrade",
+        "upgraded",
+        "expansion",
+        "expands",
+        "contract win",
+        "wins contract",
+        "order win",
+        "wins order",
+        "acquisition",
+        "partnership",
+        "tie-up",
+        "launch",
+        "launches",
+        "record",
+        "growth",
+        "profit surge",
+        "surges",
+        "breakthrough",
+        "grant",
+        "subsidy",
+        "incentive",
+        "incentives",
+        "exemption",
+        "duty cut",
+        "duty reduction",
+        "waiver",
+        "relief",
+        "boost",
+        "tariff removed",
+        "tariff exemption",
+        "trade deal",
+        "trade agreement",
+    ],
+
+}
+
+# ==========================================================
 # Macro Intelligence
 # ==========================================================
 

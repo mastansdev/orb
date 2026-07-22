@@ -8,6 +8,20 @@ ORB Auto Trader Configuration
 
 DECISION_TRACE = True
 
+# ---------------------------------
+# Console verbosity (2026-07-22)
+# ---------------------------------
+# Fix: user reported the main.py terminal "almost flooded with
+# data printing" during market hours. Full output is now always
+# captured to logs/ regardless of this setting (see market_data.py's
+# tee-to-file setup) -- this only controls whether the highest-
+# frequency per-candidate diagnostic prints (catalyst boosts,
+# market-scan-leader hits, "no catalyst evidence" notices) also
+# show up on the live console. Off by default so the terminal
+# stays readable during active market hours; flip to True for a
+# specific debugging session.
+VERBOSE_CONSOLE = False
+
 
 # ==========================
 # CAPITAL PROFILE  (plug & play)
@@ -205,7 +219,24 @@ RESULTS_DAY_BLOCK = True
 # EVENT_ENTRY_MIN_IMPORTANCE, a fresh catalyst, and a HIGHER
 # conviction bar (EVENT_ENTRY_MIN_CONVICTION) than normal
 # ORB entries, since there's no price-structure confirmation.
-EVENT_ENTRY_ENABLED = True
+#
+# DISABLED (2026-07-22): every one of today's 10 trades entered
+# before 09:16:00 -- before the ORB range even finishes forming
+# at 09:30:00, and in most cases before this path's own 09:16:00
+# minimum too (that part is still unexplained, see #14). Traced
+# the news-evidence judgment behind this path and found it was
+# running on broken parts nearly the whole way through: the
+# recommendation field can never actually say "don't buy" (always
+# returns WAIT regardless of the story), the impact-rule table has
+# no entry for real events like today's tariff story so it silently
+# scores them as zero-impact, and confidence/direction/headline
+# were independently wrong until today's fixes. Combined result:
+# ~-45,000 loss, and the ORB strategy never got to run at all today.
+# Reverting to pure ORB-confirmed entries (the original rule: wait
+# for the range, trade only a confirmed breakout, nothing else)
+# until the news pipeline above is properly fixed and validated
+# with real data, not just unit tests. Re-enable only after that.
+EVENT_ENTRY_ENABLED = False
 EVENT_ENTRY_MIN_IMPORTANCE = 75     # watchlist catalyst strength
 EVENT_ENTRY_MIN_CONVICTION = 65     # higher bar than ORB entries
 EVENT_ENTRY_FRESH_MINUTES = 45      # catalyst must be this fresh

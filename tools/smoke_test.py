@@ -152,6 +152,28 @@ def check(name, condition):
 
 
 def run():
+    """
+    Fix (2026-07-22): the actual test body used to run flat,
+    with cleanup as the LAST line -- so any unhandled exception
+    partway through (a failing check(), a crash, a Ctrl+C)
+    skipped cleanup entirely and could leave a real, saved
+    smoke-test position sitting in open_positions.json for the
+    live bot to "recover" on its next startup. Traced this path
+    while investigating a real live incident (2026-07-22) where
+    a batch of unrelated symbols entered with identical
+    timestamps -- this specific test wasn't confirmed as that
+    incident's cause (it uses a synthetic SMOKETEST_SECTOR tag,
+    which never appeared in the real trade log), but the gap
+    was real and worth closing regardless: cleanup must run
+    even when the test body fails.
+    """
+    try:
+        return _run_body()
+    finally:
+        clean_recovery_file()
+
+
+def _run_body():
     print("=" * 60)
     print("END-TO-END PAPER SMOKE TEST")
     print("=" * 60)
@@ -326,9 +348,8 @@ def run():
 
     engine.shutdown()
 
-    # Never leave smoke-test positions behind for the
-    # real bot to "recover" on next startup.
-    clean_recovery_file()
+    # Cleanup now guaranteed by run()'s try/finally wrapper
+    # above, even if this function raises before reaching here.
 
     print()
     print("=" * 60)

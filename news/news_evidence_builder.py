@@ -95,12 +95,32 @@ class NewsEvidenceBuilder:
     ):
         """
         Convert Market Story into
-        BUY / WAIT / IGNORE.
+        BUY / SELL / WAIT.
+
+        Fix (2026-07-22): this used to unconditionally return
+        "WAIT" -- the story and impact parameters were accepted
+        but never actually read. Confirmed live: this meant NO
+        piece of news evidence, ever, regardless of content,
+        could vote in the conviction engine's bullish/bearish
+        alignment check (WAIT isn't in either vocabulary list).
+        A single news item still shouldn't be the ONLY thing
+        that can force a trade -- that philosophy was right --
+        but it must be able to at least vote against a bad one,
+        which it structurally never could. Same net-impact
+        weighting as _score() below and Brain.build_news_
+        evidence's story_direction fix, so all three stay
+        consistent with each other.
         """
-        # --------------------------------------------------
-        # News alone never triggers a trade.
-        # It prepares the Brain to watch the opportunity.
-        # --------------------------------------------------
+        net_impact = (
+            impact.market_score * 3
+            + impact.sector_score * 2
+            + impact.stock_score
+        )
+
+        if net_impact > 0:
+            return "BUY"
+        if net_impact < 0:
+            return "SELL"
         return "WAIT"
 
     # --------------------------------------------------

@@ -1,10 +1,57 @@
 import os
-import signal
+import sys
 import threading
 import time
 import traceback
 import queue
 from datetime import datetime
+
+# --------------------------------------------------
+# Auto-Capture Everything To A File (2026-07-22)
+#
+# Fix: today's biggest investigation (#14 in the after-close
+# punch list) needed to know exactly what the bot printed at
+# the moment of a specific trade decision, and the answer was
+# "check the terminal scrollback" -- which is gone the instant
+# the window closes or scrolls past its buffer. DecisionTrace
+# (tools/decision_trace.py) only ever prints, never saves.
+# From now on, EVERYTHING printed to this terminal is also
+# written to a timestamped file under logs/, automatically, no
+# manual `> bot_log.txt` redirect needed. One file per process
+# start (not appended across restarts) so a specific morning's
+# run is never mixed with a later restart's output -- exactly
+# the kind of mixing that made today's timeline confusing to
+# reconstruct.
+# --------------------------------------------------
+os.makedirs("logs", exist_ok=True)
+_log_filename = (
+    f"logs/bot_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.log"
+)
+
+
+class _Tee:
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for s in self._streams:
+            try:
+                s.write(data)
+            except Exception:
+                pass
+
+    def flush(self):
+        for s in self._streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+
+
+_log_file = open(_log_filename, "a", encoding="utf-8")
+sys.stdout = _Tee(sys.stdout, _log_file)
+sys.stderr = _Tee(sys.stderr, _log_file)
+print(f"[LOGGING] Full session output also being saved to {_log_filename}")
 
 from dotenv import load_dotenv
 from dhanhq import DhanContext, MarketFeed
@@ -25,6 +72,12 @@ load_dotenv()
 # --------------------------------------------------
 
 engine = Engine()
+# Fix (2026-07-22): news ingestion now runs on its own thread
+# from process start, independent of ticks -- see
+# Engine.start_news_thread() in core/engine.py. Started here,
+# right after construction, same place the old tick-gated
+# version used to only start working from.
+engine.start_news_thread()
 loader = InstrumentLoader()
 logger = ErrorLogger()
 telegram_command_center = TelegramCommandCenter(
@@ -632,13 +685,86 @@ reconnect_count = 0
 # --------------------------------------------------
 _shutdown_requested = False
 
+# --------------------------------------------------
+# Fix (2026-07-22, take 2): the flag-based custom signal.signal()
+# handler from the first attempt was verified correct in
+# simulation but confirmed NOT to work live, twice, on the real
+# machine -- even after moving feed.run() to a background thread.
+#
+# Traced deeper into the dhanhq SDK itself: feed.run() internally
+# does `self.loop.run_until_complete(self._run_async())` -- an
+# asyncio event loop -- and its OWN internal handling is
+# `except KeyboardInterrupt: self.close_connection()`. That only
+# works if a genuine KeyboardInterrupt lands inside that exact
+# call, which is ONLY possible on the main thread (Python can
+# never raise KeyboardInterrupt on a background thread, no
+# matter what). Moving feed.run() to a background thread (still
+# correct and necessary -- see below) makes the SDK's own
+# handling permanently unreachable, which is fine as long as our
+# OWN detection on the main thread works instead.
+#
+# Replacing the custom signal.signal(SIGINT, ...) override with
+# plain try/except KeyboardInterrupt around the main thread's
+# polling loop -- Python's DEFAULT Ctrl+C behavior, the most
+# battle-tested path in CPython on every platform including
+# Windows, instead of a hand-rolled handler that may not be
+# firing reliably on this machine for reasons that can't be
+# diagnosed further without live access to reproduce it. This
+# is the standard, simplest pattern for exactly this situation.
+# --------------------------------------------------
 
-def _handle_sigint(signum, frame):
-    global _shutdown_requested
-    _shutdown_requested = True
+# --------------------------------------------------
+# Fix (2026-07-22, take 3): confirmed live -- the first Ctrl+C
+# now DOES get caught ("Stopping ORB Auto Trader..." printed),
+# but the cleanup step feed.close_connection() itself hung: it
+# internally calls a concurrent.futures Future.result() with NO
+# timeout, waiting on the SDK's own asyncio loop. If that never
+# resolves and the user (reasonably, waiting with no feedback)
+# presses Ctrl+C a SECOND time, that second KeyboardInterrupt
+# lands inside Future.result()'s wait -- and "except Exception:
+# pass" around close_connection() does NOT catch it, because
+# KeyboardInterrupt subclasses BaseException, not Exception.
+# Result: an ugly unhandled traceback instead of a clean exit.
+#
+# Fix: run close_connection() on its own short-lived thread with
+# an explicit timeout, so the main thread is never stuck waiting
+# on the SDK indefinitely, and print visible feedback while
+# waiting. A second Ctrl+C during that wait is now caught
+# explicitly and just forces the exit instead of crashing.
+# --------------------------------------------------
 
 
-signal.signal(signal.SIGINT, _handle_sigint)
+def _safe_close_connection(_feed, timeout=5):
+    done = threading.Event()
+
+    def _closer():
+        try:
+            _feed.close_connection()
+        except Exception:
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(
+        target=_closer, daemon=True, name="feed-close"
+    ).start()
+
+    print(f"[SHUTDOWN] Closing feed connection (up to {timeout}s)...")
+    try:
+        finished = done.wait(timeout=timeout)
+    except KeyboardInterrupt:
+        print(
+            "\n[SHUTDOWN] Second Ctrl+C -- forcing exit without "
+            "waiting for cleanup."
+        )
+        return
+
+    if not finished:
+        print(
+            f"[SHUTDOWN] close_connection() did not finish within "
+            f"{timeout}s -- abandoning cleanup and exiting anyway "
+            f"(this is safe: PAPER mode, no live orders pending)."
+        )
 
 while True:
 
@@ -668,66 +794,74 @@ while True:
     )
 
     print("✅ MarketFeed object created")
-    print("Starting persistent connection (feed.run())...")
+    print("Starting persistent connection (feed.run(), on its own thread)...")
 
+    _feed_error = {"exc": None}
+
+    def _run_feed(_feed=feed, _err=_feed_error):
+        try:
+            _feed.run()
+        except Exception as e:
+            _err["exc"] = e
+
+    feed_thread = threading.Thread(
+        target=_run_feed, daemon=True, name="dhan-feed"
+    )
+    feed_thread.start()
+
+    # Main thread stays free the entire time the feed thread is
+    # alive -- this loop is what's actually interruptible now.
+    # Plain try/except KeyboardInterrupt (Python's default
+    # Ctrl+C behavior) instead of a custom signal handler --
+    # see the fix note above for why.
     try:
-        # feed.run() is a BLOCKING call that keeps a single continuous
-        # event loop alive for the whole session -- including automatic
-        # reconnect handling inside the SDK itself -- so the keepalive
-        # ping/pong exchange is never interrupted by idle gaps the way
-        # the previous get_data()-in-a-loop pattern was.
-        feed.run()
+        while feed_thread.is_alive():
+            time.sleep(1)
+    except KeyboardInterrupt:
+        _shutdown_requested = True
 
-        if _shutdown_requested:
-            print("\nStopping ORB Auto Trader (Ctrl+C)...")
-            event_logger.system(
-                event="ENGINE_STOPPED",
-                message="Stopped by Ctrl+C"
-            )
-            try:
-                feed.close_connection()
-            except Exception:
-                pass
-            break
+    if _shutdown_requested:
+        print("\nStopping ORB Auto Trader (Ctrl+C)...")
+        event_logger.system(
+            event="ENGINE_STOPPED",
+            message="Stopped by Ctrl+C"
+        )
+        _safe_close_connection(feed, timeout=5)
+        try:
+            feed_thread.join(timeout=5)
+        except KeyboardInterrupt:
+            pass
+        break
 
-        # A clean return (no exception), NOT caused by a Ctrl+C,
-        # is itself unexpected during market hours -- treat it
-        # the same as a dropped connection and reconnect rather
-        # than letting the process exit silently.
+    # feed_thread finished on its own -- either a clean return
+    # (unexpected during market hours, treat like a drop) or it
+    # raised (captured into _feed_error above, since exceptions
+    # on a background thread don't propagate to the main thread
+    # the way a direct call's would).
+    exc = _feed_error["exc"]
+
+    if exc is None:
         print(
             "[RECONNECT] feed.run() returned without an exception "
             "-- reconnecting..."
         )
-
-    except KeyboardInterrupt:
-        event_logger.system(
-            event="ENGINE_STOPPED",
-            message="Stopped by KeyboardInterrupt"
-        )
-        print("\nStopping ORB Auto Trader...")
-        try:
-            feed.close_connection()
-        except Exception:
-            pass
-        break
-
-    except Exception as e:
+    else:
         reconnect_count += 1
 
         event_logger.error(
             event="ENGINE_EXCEPTION",
-            message=str(e)
+            message=str(exc)
         )
-        logger.log(e)
+        logger.log(exc)
 
         print("\n========== FULL TRACEBACK ==========")
-        traceback.print_exc()
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
         print("====================================")
 
         try:
             engine.telegram.send(
                 f"🔴 Dhan connection lost (reconnect attempt "
-                f"#{reconnect_count})\n{str(e)[:200]}\n\n"
+                f"#{reconnect_count})\n{str(exc)[:200]}\n\n"
                 f"Auto-reconnecting in "
                 f"{RECONNECT_BACKOFF_SECONDS}s -- open positions "
                 f"are NOT protected (no stop/target/square-off "
@@ -736,14 +870,14 @@ while True:
         except Exception:
             pass
 
-    # Fix (2026-07-22): this used to be one uninterruptible
-    # time.sleep(RECONNECT_BACKOFF_SECONDS) with no try/except
-    # anywhere near it -- a Ctrl+C landing here produced an
-    # unhandled KeyboardInterrupt and an ugly traceback (still
-    # exited, just messily). Responsive 1s-at-a-time sleep, same
-    # pattern as railway_main.py's shutdown loop, so Ctrl+C is
-    # caught within 1 second instead of possibly the full 15.
-    for _ in range(RECONNECT_BACKOFF_SECONDS):
-        if _shutdown_requested:
-            break
-        time.sleep(1)
+    # Responsive 1s-at-a-time sleep so Ctrl+C during the
+    # reconnect backoff is caught within 1 second, same pattern
+    # as railway_main.py's shutdown loop.
+    try:
+        for _ in range(RECONNECT_BACKOFF_SECONDS):
+            time.sleep(1)
+    except KeyboardInterrupt:
+        _shutdown_requested = True
+
+if _shutdown_requested:
+    print("Shutdown complete.")

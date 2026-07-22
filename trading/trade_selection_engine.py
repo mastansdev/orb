@@ -3,6 +3,7 @@ from config import (
     CATALYST_GATE_ENABLED,
     CATALYST_PROVIDERS,
     CATALYST_MIN_SCORE,
+    VERBOSE_CONSOLE,
 )
 from intelligence.evidence_builder import EvidenceBuilder
 from intelligence.evidence_validator import EvidenceValidator
@@ -10,6 +11,7 @@ from intelligence.conviction_engine import ConvictionEngine
 from intelligence.brain import Brain, DecisionAction
 from tools.decision_trace import DecisionTrace
 from intelligence.opportunity_pool_engine import opportunity_pool
+import threading
 
 class TradeSelectionEngine:
 
@@ -17,6 +19,18 @@ class TradeSelectionEngine:
         self.breakouts = 0
         self.selected = 0
         self.skipped = 0
+
+        # Fix (2026-07-22): ingest_news() is now called from TWO
+        # threads -- the Engine's background news thread (see
+        # Engine.start_news_thread()) AND synchronously from
+        # inside evaluate() below, which runs on the main tick
+        # thread. Both mutate the same shared state (news
+        # watchlist, opportunity pool, F&O watchlist, causal
+        # engine, knowledge graph). This lock serializes the two
+        # so they can never run the actual ingest body at the
+        # same time -- a thread that loses the race just blocks
+        # briefly instead of racing on shared state.
+        self._ingest_lock = threading.Lock()
 
         self.evidence_builder = EvidenceBuilder()
         self.evidence_validator = EvidenceValidator()
@@ -51,6 +65,16 @@ class TradeSelectionEngine:
 
     def ingest_news(self):
         """
+        Thread-safe public entry point -- see _ingest_lock in
+        __init__ for why this needs to be locked (called from
+        both the Engine's background news thread and, inline,
+        from evaluate() on the main tick thread).
+        """
+        with self._ingest_lock:
+            return self._ingest_news_impl()
+
+    def _ingest_news_impl(self):
+        """
         Pull new Railway stories and push them through EVERY
         intelligence layer: company memory, results calendar,
         structured events, F&O catalyst watchlist, causal
@@ -62,6 +86,13 @@ class TradeSelectionEngine:
         watchlist, ever. Now the Engine calls this on a timer
         (every NEWS_INGEST_SECONDS) from the tick loop, so
         the watchlist builds continuously all day.
+
+        Fix (2026-07-22): moved off the tick loop entirely onto
+        its own background thread (Engine.start_news_thread()),
+        which is why this now needs the lock in ingest_news()
+        above -- evaluate() below still calls this synchronously
+        too, on the main tick thread, so both paths must be
+        serialized against each other.
 
         Returns fresh news evidence (newly built + cached
         from recent cycles, 30-minute window).
@@ -1040,7 +1071,7 @@ class TradeSelectionEngine:
             # no matched news story yet.
             scan_rank = self._market_scan_rank(symbol)
 
-            if catalysts:
+            if catalysts and VERBOSE_CONSOLE:
                 print(
                     f"[CATALYST] {symbol} boosted by: "
                     + "; ".join(
@@ -1075,13 +1106,14 @@ class TradeSelectionEngine:
                         },
                     )
                 )
-                print(
-                    f"[MARKET SCAN] {symbol}: #{scan_rank} "
-                    f"strongest in market ({change:+.2f}%) — "
-                    f"added as evidence"
-                )
+                if VERBOSE_CONSOLE:
+                    print(
+                        f"[MARKET SCAN] {symbol}: #{scan_rank} "
+                        f"strongest in market ({change:+.2f}%) — "
+                        f"added as evidence"
+                    )
 
-            if not catalysts and scan_rank is None:
+            if not catalysts and scan_rank is None and VERBOSE_CONSOLE:
                 print(
                     f"[{symbol}] no catalyst/scan evidence — "
                     f"still evaluated on structural evidence "
