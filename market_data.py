@@ -1,4 +1,5 @@
 import os
+import signal
 import threading
 import time
 import traceback
@@ -336,6 +337,32 @@ def watchdog_monitor():
     while True:
         time.sleep(15)
 
+        # Fix (2026-07-22): the watchdog had no concept of market
+        # hours -- it fires the exact same "NO LIVE TICKS, open
+        # positions are NOT protected" alarm whether the feed
+        # genuinely died at 11am, or it's simply 8:34am and Dhan
+        # hasn't started sending pre-open data yet. Confirmed live
+        # today: false alarms every ~60s from process start until
+        # market opens, each one a scary Telegram message about
+        # unprotected positions that don't even exist yet (no
+        # entries are possible before market opens anyway).
+        #
+        # 09:07 -- not 09:00 -- because last night's real captured
+        # diagnostic (premarket_feed_test log) confirmed genuine
+        # pre-open discovered price only starts appearing around
+        # 09:07:57; before that, packets carry stale prior-session
+        # data even once the WebSocket itself is connected.
+        #
+        # Keep resetting the clock (not just skipping the check)
+        # while we're outside the window, so the FIRST real check
+        # once the window opens starts counting fresh -- otherwise
+        # elapsed time silently accumulated since process start
+        # would trip the alarm the instant the window opens.
+        now_hm = datetime.now().strftime("%H:%M")
+        if now_hm < "09:07" or now_hm > "15:30":
+            engine.watchdog.tick_received()
+            continue
+
         elapsed = engine.watchdog.seconds_since_last_tick()
 
         if elapsed >= WATCHDOG_TIMEOUT and not alerted:
@@ -582,7 +609,46 @@ def on_message(instance, tick):
 RECONNECT_BACKOFF_SECONDS = 15
 reconnect_count = 0
 
+# --------------------------------------------------
+# Fix (2026-07-22): Ctrl+C didn't reliably stop main.py.
+#
+# Confirmed live today: the FIRST Ctrl+C during feed.run()
+# doesn't always surface as a Python KeyboardInterrupt at all --
+# the dhanhq SDK's own WebSocket close handshake can absorb it
+# and feed.run() returns NORMALLY instead (seen live: "sent 1000
+# (OK); no close frame received"). That hits the "clean return"
+# branch below, which always assumed a silent connection drop
+# and reconnected -- exactly backwards from what the user wanted.
+# The SECOND Ctrl+C then landed inside the bare
+# time.sleep(RECONNECT_BACKOFF_SECONDS) below, which had no
+# try/except around it at all -- an unhandled KeyboardInterrupt
+# and an ugly traceback, though the process did still exit.
+#
+# Fix, same proven pattern already used in railway_main.py: a
+# real OS-level SIGINT handler that just sets a flag, checked
+# everywhere a Ctrl+C might land -- doesn't depend on any
+# particular exception actually propagating through the SDK's
+# own blocking call.
+# --------------------------------------------------
+_shutdown_requested = False
+
+
+def _handle_sigint(signum, frame):
+    global _shutdown_requested
+    _shutdown_requested = True
+
+
+signal.signal(signal.SIGINT, _handle_sigint)
+
 while True:
+
+    if _shutdown_requested:
+        print("\nStopping ORB Auto Trader (Ctrl+C)...")
+        event_logger.system(
+            event="ENGINE_STOPPED",
+            message="Stopped by Ctrl+C"
+        )
+        break
 
     current_time = datetime.now().strftime("%H:%M")
     if current_time >= "16:00":
@@ -612,10 +678,22 @@ while True:
         # the previous get_data()-in-a-loop pattern was.
         feed.run()
 
-        # A clean return (no exception) from a BLOCKING call is itself
-        # unexpected during market hours -- treat it the same as a
-        # dropped connection and reconnect rather than letting the
-        # process exit silently.
+        if _shutdown_requested:
+            print("\nStopping ORB Auto Trader (Ctrl+C)...")
+            event_logger.system(
+                event="ENGINE_STOPPED",
+                message="Stopped by Ctrl+C"
+            )
+            try:
+                feed.close_connection()
+            except Exception:
+                pass
+            break
+
+        # A clean return (no exception), NOT caused by a Ctrl+C,
+        # is itself unexpected during market hours -- treat it
+        # the same as a dropped connection and reconnect rather
+        # than letting the process exit silently.
         print(
             "[RECONNECT] feed.run() returned without an exception "
             "-- reconnecting..."
@@ -658,4 +736,14 @@ while True:
         except Exception:
             pass
 
-    time.sleep(RECONNECT_BACKOFF_SECONDS)
+    # Fix (2026-07-22): this used to be one uninterruptible
+    # time.sleep(RECONNECT_BACKOFF_SECONDS) with no try/except
+    # anywhere near it -- a Ctrl+C landing here produced an
+    # unhandled KeyboardInterrupt and an ugly traceback (still
+    # exited, just messily). Responsive 1s-at-a-time sleep, same
+    # pattern as railway_main.py's shutdown loop, so Ctrl+C is
+    # caught within 1 second instead of possibly the full 15.
+    for _ in range(RECONNECT_BACKOFF_SECONDS):
+        if _shutdown_requested:
+            break
+        time.sleep(1)
