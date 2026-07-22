@@ -357,7 +357,21 @@ NEWS_INGEST_SECONDS = 60
 # deteriorates." Re-score every open position; exit when
 # the reason to own it has decayed.
 
-THESIS_ENGINE_ENABLED = False   # OFF 2026-07-21: was churning exits in seconds; simplified risk stack
+# RE-ENABLED 2026-07-22: was turned OFF 2026-07-21 for
+# "churning exits in seconds." Root cause found and fixed the
+# same night: score_symbol() (what this engine calls to
+# re-check a position) used to silently return 0.0 on ANY
+# internal failure, indistinguishable from a genuine "thesis
+# is dead" reading. Since 0.0 is always below
+# entry_conviction * THESIS_DECAY_FRACTION, that bug alone
+# would force an exit on every single position moments after
+# the grace period, every time -- which matches "churning in
+# seconds" exactly. score_symbol() now returns None on
+# failure instead, and this engine treats None as HOLD, not
+# as a real answer. Re-enabling in PAPER mode to verify --
+# if it still churns today, THESIS_DECAY_FRACTION /
+# THESIS_GRACE_MINUTES need tuning next, not another disable.
+THESIS_ENGINE_ENABLED = True
 
 # Exit if current conviction falls below this fraction
 # of the conviction at entry (thesis has decayed).

@@ -102,11 +102,30 @@ class _WeakestPosition:
 
 class TradesPortfolioView:
 
-    def __init__(self, trades):
+    def __init__(self, trades, live_scores=None):
         self._trades = trades
+        # Fix (2026-07-22): "weakest" used to mean "lowest
+        # conviction on the day it was bought" -- a frozen
+        # snapshot, never revisited. A position that quietly
+        # decayed after entry could still look "safe" (its old
+        # high number was untouched) and get skipped for
+        # replacement; one that entered modest but has since
+        # genuinely strengthened could get treated as the
+        # weakest and replaced by mistake. live_scores (built
+        # fresh every allocation cycle from a real re-score, see
+        # Engine.run_capital_allocation_cycle) lets "weakest"
+        # mean "weakest right now." Falls back to the entry
+        # snapshot per-symbol if a live re-score wasn't
+        # available for it this cycle -- never worse than the
+        # old behavior, just more accurate when it can be.
+        self._live_scores = live_scores or {}
 
     def __bool__(self):
         return bool(self._trades)
+
+    def _conviction_for(self, sid, trade):
+        live = self._live_scores.get(sid)
+        return live if live is not None else trade.get("conviction", 0)
 
     def weakest_position(self):
         if not self._trades:
@@ -114,7 +133,7 @@ class TradesPortfolioView:
 
         sid, trade = min(
             self._trades.items(),
-            key=lambda item: item[1].get("conviction", 0),
+            key=lambda item: self._conviction_for(item[0], item[1]),
         )
 
         holding_seconds = self._holding_seconds(
@@ -123,7 +142,7 @@ class TradesPortfolioView:
 
         return _WeakestPosition(
             symbol=trade.get("symbol", "?"),
-            conviction=trade.get("conviction", 0),
+            conviction=self._conviction_for(sid, trade),
             holding_seconds=holding_seconds,
         )
 
@@ -2079,10 +2098,42 @@ class Engine:
             return
 
         # --------------------------------------------------
+        #  1b. Live re-score every open position (2026-07-22)
+        # --------------------------------------------------
+        # Candidates in the pool are always fresh (the pool
+        # self-expires anything over 30s old) -- but until now
+        # the OPEN side of this comparison used whatever
+        # conviction was recorded on entry, never refreshed.
+        # Re-score each held position the same way the HOLD
+        # BRAIN does, so "is this candidate better than my
+        # weakest position" compares two CURRENT numbers, not
+        # a fresh one against a stale one. A re-score failure
+        # for one symbol just falls back to its entry snapshot
+        # for this cycle (TradesPortfolioView handles that) --
+        # never blocks the cycle for everyone else.
+        live_scores = {}
+        for sid, trade in self.trades.items():
+            symbol = trade.get("symbol")
+            if not symbol:
+                continue
+            try:
+                intelligence = self.intelligence_engine.get(symbol)
+                score = self.trade_selection_engine.score_symbol(
+                    symbol, intelligence
+                )
+                if score is not None:
+                    live_scores[sid] = score
+            except Exception as e:
+                print(
+                    f"[ALLOCATION] live re-score failed for "
+                    f"{symbol}: {e}"
+                )
+
+        # --------------------------------------------------
         #  2. Ask Portfolio Intelligence: keep or replace?
         # --------------------------------------------------
 
-        portfolio = TradesPortfolioView(self.trades)
+        portfolio = TradesPortfolioView(self.trades, live_scores=live_scores)
 
         recommendation = self.portfolio_intelligence_engine.evaluate(
             portfolio=portfolio,
