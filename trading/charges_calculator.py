@@ -46,6 +46,45 @@ class ChargesCalculator:
         }
 
     # --------------------------------------------------
+    # Fix (2026-07-22): a partial-booked trade is really ONE
+    # buy order + TWO sell orders (the partial exit, then the
+    # final exit) -- calling charge_for_trade() twice would
+    # double-charge a phantom second buy order. This computes
+    # brokerage as (1 buy + N sells), same rate table, so the
+    # backtester's numbers for the true-trailing-runner mode
+    # (which always partial-books) are accurate, not inflated.
+    # --------------------------------------------------
+
+    def charge_for_multi_exit_trade(self, entry, qty, exits):
+        """
+        exits: list of (exit_price, exit_qty) tuples that sum
+        to qty -- one entry (buy) order, N exit (sell) orders.
+        """
+        buy_turnover = entry * qty
+        sell_turnover = sum(price * q for price, q in exits)
+        total_turnover = buy_turnover + sell_turnover
+
+        num_orders = 1 + len(exits)
+        brokerage = num_orders * self.BROKERAGE_PER_ORDER
+        stt = sell_turnover * self.STT_RATE
+        exchange = total_turnover * self.EXCHANGE_RATE
+        sebi = total_turnover * self.SEBI_RATE
+        stamp = buy_turnover * self.STAMP_RATE
+        gst = (brokerage + exchange + sebi) * self.GST_RATE
+
+        total_charges = (
+            brokerage + stt + exchange + sebi + stamp + gst
+        )
+
+        gross_pnl = sell_turnover - buy_turnover
+
+        return {
+            "gross_pnl": round(gross_pnl, 2),
+            "total_charges": round(total_charges, 2),
+            "net_pnl": round(gross_pnl - total_charges, 2),
+        }
+
+    # --------------------------------------------------
 
     def load_trades(self):
 

@@ -88,9 +88,22 @@ class HistoricalFetcher:
     # --------------------------------------------------
 
     def _cache_path(self, kind, security_id, from_date, to_date, interval=None):
+        # Fix (2026-07-22): from_date/to_date can carry "HH:MM:SS"
+        # (the minute-history path passes full timestamps) --
+        # Windows/NTFS rejects ":" in filenames outright, which
+        # silently failed EVERY cache write on Windows (Errno 22)
+        # and forced a full re-fetch on every single run. Strip
+        # anything that isn't safe across Windows/Linux/Mac.
+        def _sanitize(s):
+            return (
+                str(s).replace(":", "").replace(" ", "_")
+            )
+
         suffix = f"_{interval}m" if interval else ""
         fname = (
-            f"{kind}_{security_id}_{from_date}_{to_date}{suffix}.json"
+            f"{kind}_{security_id}_"
+            f"{_sanitize(from_date)}_{_sanitize(to_date)}"
+            f"{suffix}.json"
         )
         return os.path.join(self.cache_dir, fname)
 
