@@ -12,6 +12,40 @@ class ChargesCalculator:
     GST_RATE = 0.18
 
     # --------------------------------------------------
+    # Fix (2026-07-22): single-trade version of the exact
+    # same charge model above, for the historical backtester
+    # (core/historical_fetcher.py and whatever consumes it) --
+    # so a backtested trade's "net" P&L is computed with the
+    # SAME real rates the live/paper engine already uses, not
+    # a separately-invented estimate. calculate()/todays_trades()
+    # below are untouched.
+    # --------------------------------------------------
+
+    def charge_for_trade(self, entry, exit_price, qty):
+        buy_turnover = entry * qty
+        sell_turnover = exit_price * qty
+        total_turnover = buy_turnover + sell_turnover
+
+        brokerage = 2 * self.BROKERAGE_PER_ORDER  # one buy + one sell order
+        stt = sell_turnover * self.STT_RATE
+        exchange = total_turnover * self.EXCHANGE_RATE
+        sebi = total_turnover * self.SEBI_RATE
+        stamp = buy_turnover * self.STAMP_RATE
+        gst = (brokerage + exchange + sebi) * self.GST_RATE
+
+        total_charges = (
+            brokerage + stt + exchange + sebi + stamp + gst
+        )
+
+        gross_pnl = sell_turnover - buy_turnover
+
+        return {
+            "gross_pnl": round(gross_pnl, 2),
+            "total_charges": round(total_charges, 2),
+            "net_pnl": round(gross_pnl - total_charges, 2),
+        }
+
+    # --------------------------------------------------
 
     def load_trades(self):
 
